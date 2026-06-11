@@ -95,7 +95,11 @@ def test_greeting_name_extraction(contact, expected):
     assert greeting_name_from_contact_name(contact) == expected
 
 
-def test_render_outreach_email_uses_greeting():
+def test_render_outreach_email_uses_greeting(tmp_path, monkeypatch):
+    import src.outreach_template as ot
+
+    msg_path = tmp_path / "default_message.json"
+    monkeypatch.setattr(ot, "DEFAULT_MESSAGE_JSON", msg_path)
     subject, body = render_outreach_email("Nicole")
     assert subject == "Question from a fellow planner"
     assert body.startswith("Hi Nicole,")
@@ -162,7 +166,7 @@ def test_prepare_creates_outreach_rows(outreach_paths):
         ],
     )
 
-    total, new_rows = prepare_outreach()
+    total, new_rows, _stats = prepare_outreach()
     assert total == 1
     assert new_rows == 1
     rows = read_outreach_rows()
@@ -255,7 +259,7 @@ def test_generic_email_skipped_in_prepare(outreach_paths):
         [_sample_working_row(email="planning@fortmyers.gov", contact_name="Planning Dept")],
         WORKING_COLUMNS,
     )
-    total, _ = prepare_outreach()
+    total, _stats_new, _stats = prepare_outreach()
     assert total == 0
 
 

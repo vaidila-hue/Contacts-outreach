@@ -939,11 +939,30 @@ def run_outreach(args: argparse.Namespace) -> int:
     return run_outreach_send(args)
 
 
+def run_diagnose_discovery(args: argparse.Namespace) -> int:
+    load_dotenv(ROOT / ".env")
+    verify_dependencies()
+    jurisdiction = getattr(args, "jurisdiction", None) or "Merced"
+    state = getattr(args, "state", None) or "CA"
+    geography_type = getattr(args, "geography_type", None) or "city"
+
+    from src.site_discovery import diagnose_discovery, format_discovery_report
+
+    report = diagnose_discovery(
+        jurisdiction,
+        state,
+        geography_type=geography_type,
+    )
+    print(format_discovery_report(report))
+    ok = report.final_outcome != "no_official_site_found"
+    return 0 if ok else 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Discover direct planning-related contacts for local governments."
     )
-    parser.add_argument("command", nargs="?", default="build", choices=["build", "test-census", "test-search", "outreach"])
+    parser.add_argument("command", nargs="?", default="build", choices=["build", "test-census", "test-search", "diagnose-discovery", "outreach"])
     parser.add_argument(
         "--states",
         default=DEFAULT_STATES,
@@ -1013,7 +1032,7 @@ def main() -> None:
         "--max-search-queries-per-jurisdiction",
         type=int,
         default=None,
-        help="Max search queries for official-site fallback (default: 1; --deep: 5)",
+        help="Max search queries for official-site fallback (default: 8; --deep: 12)",
     )
     parser.add_argument(
         "--no-fetch-cache",
@@ -1041,8 +1060,14 @@ def main() -> None:
         default="",
         help="Override search query for test-search",
     )
-    parser.add_argument("--jurisdiction", default="South Burlington", help="For test-search filter")
-    parser.add_argument("--state", default="VT", help="For test-search filter")
+    parser.add_argument("--jurisdiction", default="South Burlington", help="Jurisdiction name for test-search / diagnose-discovery")
+    parser.add_argument("--state", default="VT", help="State abbreviation for test-search / diagnose-discovery")
+    parser.add_argument(
+        "--geography-type",
+        default="city",
+        dest="geography_type",
+        help="Geography type for diagnose-discovery (city, town, county)",
+    )
     parser.add_argument("--prepare", action="store_true", help="Outreach: merge contacts into outreach.csv")
     parser.add_argument("--serve", action="store_true", help="Outreach: start local CRM UI and open browser")
     parser.add_argument(
@@ -1069,6 +1094,8 @@ def main() -> None:
         raise SystemExit(run_test_census(args))
     elif args.command == "test-search":
         raise SystemExit(run_test_search(args))
+    elif args.command == "diagnose-discovery":
+        raise SystemExit(run_diagnose_discovery(args))
     elif args.command == "outreach":
         raise SystemExit(run_outreach(args))
 

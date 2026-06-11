@@ -62,7 +62,8 @@ PAGE_TEMPLATE = """
     .status-failed { color: #a00; font-weight: bold; }
     input[type=text], input[type=datetime-local], select, textarea { width: 100%; min-width: 70px; box-sizing: border-box; font-size: 12px; }
     textarea { min-height: 48px; }
-    .msg { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; background: #eef6ff; border: 1px solid #99c; margin-bottom: 12px; }
+    .msg { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 10px; background: #eef6ff; border: 1px solid #99c; margin-bottom: 12px; }
+    .msg span { flex: 1; white-space: pre-line; }
     .msg.hidden { display: none; }
     .msg.warn { background: #fff8e6; border-color: #cc9; }
     .msg-dismiss { background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer; color: #444; padding: 0 4px; }
@@ -509,6 +510,12 @@ def create_app() -> Flask:
         stats = compute_dashboard(all_rows)
         rows = _display_rows(all_rows, filter_name)
         message = request.args.get("msg", "")
+        if request.args.get("harvest") == "1":
+            from src.harvest_summary import load_harvest_summary
+
+            summary = load_harvest_summary()
+            if summary:
+                message = summary.format_message()
         harvest_config = load_harvest_config()
         default_message = load_default_message()
         return render_template_string(
@@ -553,12 +560,8 @@ def create_app() -> Flask:
         settings = _parse_harvest_form()
         persist_harvest_config(settings)
         try:
-            result = run_find_more_contacts()
-            msg = (
-                f"Harvest complete: {result.jurisdictions_processed} jurisdictions, "
-                f"{result.new_outreach_rows} new contacts "
-                f"({result.total_outreach_rows} total)."
-            )
+            run_find_more_contacts()
+            return redirect(url_for("index", harvest="1"))
         except Exception as exc:
             msg = f"Harvest failed: {exc}"
         return redirect(url_for("index", msg=msg))
@@ -569,11 +572,8 @@ def create_app() -> Flask:
         if updates:
             update_outreach_rows(updates)
         try:
-            result = run_find_more_contacts()
-            msg = (
-                f"Found {result.new_outreach_rows} new contacts "
-                f"({result.total_outreach_rows} total)."
-            )
+            run_find_more_contacts()
+            return redirect(url_for("index", harvest="1"))
         except Exception as exc:
             msg = f"Find more contacts failed: {exc}"
         return redirect(url_for("index", msg=msg))

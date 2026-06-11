@@ -13,6 +13,7 @@ WORKING_CSV = DATA_DIR / "prospects_working.csv"
 REJECTED_CSV = DATA_DIR / "prospects_rejected.csv"
 OUTREACH_CSV = DATA_DIR / "outreach.csv"
 HARVEST_CONFIG_JSON = DATA_DIR / "harvest_config.json"
+LAST_HARVEST_SUMMARY_JSON = DATA_DIR / "last_harvest_summary.json"
 DEFAULT_MESSAGE_JSON = DATA_DIR / "default_message.json"
 EXAMPLES_DIR = DATA_DIR / "examples"
 JURISDICTIONS_CSV = DATA_DIR / "jurisdictions_filtered.csv"
@@ -196,4 +197,9 @@ DIAGNOSTICS_COLUMNS = [
     "max_page_limit_hit",
     "timeout_count",
     "fetch_error_count",
+    "resolver_method",
+    "search_results_seen",
+    "search_results_rejected",
+    "planning_fallback_used",
+    "planning_fallback_url",
 ]

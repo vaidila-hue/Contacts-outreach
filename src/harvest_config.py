@@ -11,7 +11,7 @@ class HarvestConfig:
     max_pages_per_jurisdiction: int = 8
     max_profile_pages_per_jurisdiction: int = 4
     max_directory_pages_per_jurisdiction: int = 3
-    max_search_queries_per_jurisdiction: int = 1
+    max_search_queries_per_jurisdiction: int = 8
     use_fetch_cache: bool = True
     fetch_cache_ttl_days: int = 7
     use_domain_cache: bool = True
@@ -25,13 +25,13 @@ class HarvestConfig:
             "max_pages": 10,
             "max_profile": 4,
             "max_directory": 4,
-            "max_search": 1,
+            "max_search": 8,
         }
         deep_defaults = {
             "max_pages": 25,
             "max_profile": 10,
             "max_directory": 8,
-            "max_search": 5,
+            "max_search": 12,
         }
         defaults = deep_defaults if deep else normal_defaults
         return cls(

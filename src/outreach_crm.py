@@ -118,13 +118,12 @@ def locate_key(row: dict[str, str]) -> tuple[str, str, str]:
     )
 
 
-def duplicate_match(existing: dict[str, str], candidate: dict[str, str]) -> bool:
-    if outreach_key(existing) == outreach_key(candidate):
-        return True
+def classify_duplicate(existing: dict[str, str], candidate: dict[str, str]) -> str | None:
+    """Return duplicate category, or None if not a duplicate."""
     e_email = (existing.get("email") or "").strip().lower()
     c_email = (candidate.get("email") or "").strip().lower()
     if e_email and c_email and e_email == c_email:
-        return True
+        return "duplicate_email"
     e_name = (existing.get("contact_name") or "").strip().lower()
     c_name = (candidate.get("contact_name") or "").strip().lower()
     e_j = (existing.get("jurisdiction_name") or "").strip().lower()
@@ -132,12 +131,18 @@ def duplicate_match(existing: dict[str, str], candidate: dict[str, str]) -> bool
     e_s = (existing.get("state") or "").strip().upper()
     c_s = (candidate.get("state") or "").strip().upper()
     if e_name and c_name and e_name == c_name and e_j == c_j and e_s == c_s:
-        return True
+        return "duplicate_contact_jurisdiction"
     e_src = (existing.get("email_source_url") or "").strip().lower()
     c_src = (candidate.get("email_source_url") or "").strip().lower()
     if e_src and c_src and c_name and e_src == c_src and e_name == c_name:
-        return True
-    return False
+        return "duplicate_source_name"
+    if outreach_key(existing) == outreach_key(candidate):
+        return "duplicate_email_jurisdiction"
+    return None
+
+
+def duplicate_match(existing: dict[str, str], candidate: dict[str, str]) -> bool:
+    return classify_duplicate(existing, candidate) is not None
 
 
 def is_duplicate_of_any(candidate: dict[str, str], rows: list[dict[str, str]]) -> bool:

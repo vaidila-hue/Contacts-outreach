@@ -14,15 +14,21 @@ from src.csv_utils import write_csv
 from src.jurisdiction_utils import normalize_jurisdiction_name
 
 STATE_FIPS: dict[str, str] = {
+    "CA": "06",
     "CT": "09",
     "DE": "10",
     "FL": "12",
     "GA": "13",
     "MI": "26",
+    "MN": "27",
+    "MO": "29",
     "MT": "30",
+    "NV": "32",
+    "NM": "35",
     "OR": "41",
     "PA": "42",
     "RI": "44",
+    "TX": "48",
     "VT": "50",
     "VA": "51",
     "WA": "53",

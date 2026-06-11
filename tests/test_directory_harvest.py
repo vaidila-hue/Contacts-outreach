@@ -65,8 +65,8 @@ def test_harvest_finds_contact_on_official_directory(monkeypatch):
             return JurisdictionFetchStats()
 
     monkeypatch.setattr(
-        "src.directory_harvest._try_guess_official",
-        lambda *a, **k: "https://www.southburlingtonvt.gov",
+        "src.directory_harvest._resolve_official_site",
+        lambda *a, **k: ("https://www.southburlingtonvt.gov", []),
     )
 
     working, rejected, diag_row = harvest_jurisdiction(j, StubFetcher())

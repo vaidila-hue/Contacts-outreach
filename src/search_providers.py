@@ -178,16 +178,21 @@ def filter_hit_for_jurisdiction(
     jurisdiction_name: str,
     state: str,
     gov_only: bool = False,
+    geography_type: str = "city",
 ) -> FilteredSearchResult:
-    from src.jurisdiction_utils import url_matches_jurisdiction
+    from src.site_discovery import classify_search_rejection
 
     if not hit.url:
-        return FilteredSearchResult(hit, False, "empty url")
-    if gov_only and not (is_gov_url(hit.url) or _is_municipal_site(hit.url)):
-        return FilteredSearchResult(hit, False, "not .gov/.org/.us")
-    if not url_matches_jurisdiction(hit.url, jurisdiction_name, state):
-        return FilteredSearchResult(hit, False, "jurisdiction/state mismatch")
-    return FilteredSearchResult(hit, True, "accepted")
+        return FilteredSearchResult(hit, False, "empty_url")
+    if gov_only:
+        from src.fetch_pages import is_municipal_url
+
+        if not is_municipal_url(hit.url):
+            return FilteredSearchResult(hit, False, "unsupported_domain_pattern")
+    accepted, reason = classify_search_rejection(
+        hit, jurisdiction_name, state, geography_type, planning_context=False
+    )
+    return FilteredSearchResult(hit, accepted, reason)
 
 
 def diagnose_search(

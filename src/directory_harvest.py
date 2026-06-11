@@ -26,17 +26,12 @@ from src.extract_contacts import (
     select_best_contact,
 )
 from src.extract_emails import classify_email, extract_emails_from_text, is_generic_email
-from src.fetch_pages import PageFetcher, guess_official_urls, is_gov_url
+from src.fetch_pages import PageFetcher
 from src.harvest_config import HarvestConfig
-from src.jurisdiction_utils import (
-    is_blocked_official_url,
-    is_parking_or_error_page,
-    url_matches_jurisdiction,
-)
 from src.jurisdiction_validation import validate_jurisdiction_match
 from src.manual_urls import ManualUrlEntry
 from src.role_config import matches_allowlisted_title
-from src.search_providers import search_text
+from src.site_discovery import resolve_official_site
 from src.staff_discovery import (
     classify_page_url,
     crawl_priority,
@@ -61,7 +56,6 @@ HARVEST_PROBE_PATHS: tuple[str, ...] = (
     "/land-use",
 )
 
-MAX_GUESS_ATTEMPTS = 6
 MAX_PLANNING_PAGE_FETCHES = 5
 
 GEOGRAPHY_PROCESS_ORDER: dict[str, int] = {
@@ -122,6 +116,11 @@ class HarvestDiagnostics:
     max_page_limit_hit: str = "no"
     timeout_count: int = 0
     fetch_error_count: int = 0
+    resolver_method: str = ""
+    search_results_seen: int = 0
+    search_results_rejected: int = 0
+    planning_fallback_used: str = "no"
+    planning_fallback_url: str = ""
 
 
 def diagnostics_row(
@@ -155,6 +154,11 @@ def diagnostics_row(
         "max_page_limit_hit": hdiag.max_page_limit_hit,
         "timeout_count": str(hdiag.timeout_count),
         "fetch_error_count": str(hdiag.fetch_error_count),
+        "resolver_method": hdiag.resolver_method,
+        "search_results_seen": str(hdiag.search_results_seen),
+        "search_results_rejected": str(hdiag.search_results_rejected),
+        "planning_fallback_used": hdiag.planning_fallback_used,
+        "planning_fallback_url": hdiag.planning_fallback_url,
     }
 
 
@@ -178,43 +182,6 @@ def _probe_urls(official_url: str) -> list[tuple[str, str]]:
     return urls
 
 
-def _try_guess_official(j: Jurisdiction, fetcher: PageFetcher) -> str | None:
-    for url in guess_official_urls(j.jurisdiction_name, j.state)[:MAX_GUESS_ATTEMPTS]:
-        if is_blocked_official_url(url):
-            continue
-        if not url_matches_jurisdiction(url, j.jurisdiction_name, j.state):
-            continue
-        html = fetcher.fetch_html(url)
-        if html and not is_parking_or_error_page(html):
-            return normalize_url(url)
-    return None
-
-
-def _search_official_site(
-    j: Jurisdiction,
-    fetcher: PageFetcher,
-    diag: HarvestDiagnostics,
-) -> str | None:
-    from src.jurisdiction_utils import normalize_jurisdiction_name
-
-    display = normalize_jurisdiction_name(j.jurisdiction_name)
-    query = f'"{display}" "{j.state}" official website'
-    hits, _ = search_text(query, max_results=5, delay=0, gov_only=False)
-    diag.search_queries_run += 1
-    diag.search_urls_found = len(hits)
-    for hit in hits:
-        if not hit.url or is_blocked_official_url(hit.url):
-            continue
-        if not url_matches_jurisdiction(hit.url, j.jurisdiction_name, j.state):
-            continue
-        if not is_gov_url(hit.url):
-            continue
-        html = fetcher.fetch_html(hit.url)
-        if html and not is_parking_or_error_page(html):
-            return normalize_url(hit.url)
-    return None
-
-
 def _resolve_official_site(
     j: Jurisdiction,
     fetcher: PageFetcher,
@@ -222,31 +189,46 @@ def _resolve_official_site(
     diag: HarvestDiagnostics,
     config: HarvestConfig,
     domain_cache: dict[tuple[str, str, str], dict[str, str]],
-) -> str | None:
+) -> tuple[str | None, list[str]]:
+    """Return (official_url, manual_direct_urls from planning fallback)."""
     if manual_official:
         url = normalize_url(manual_official)
         if url and config.use_domain_cache:
             save_domain_cache_entry(j, url, "manual", domain_cache)
-        return url
+        diag.resolver_method = "manual"
+        return url, []
 
     if config.use_domain_cache and not config.refresh_domain_cache:
         cached = lookup_domain_cache(j, domain_cache)
         if cached:
-            return cached
+            diag.resolver_method = "cache"
+            return cached, []
 
-    official = _try_guess_official(j, fetcher)
-    if official:
-        if config.use_domain_cache:
-            save_domain_cache_entry(j, official, "guess", domain_cache)
-        return official
+    result = resolve_official_site(
+        j,
+        fetcher,
+        config,
+        manual_official=None,
+        skip_guess=False,
+    )
+    diag.search_queries_run = result.search_queries_run
+    diag.search_results_seen = result.search_results_seen
+    diag.search_results_rejected = result.search_results_rejected
+    diag.resolver_method = result.resolver_method
 
-    if diag.search_queries_run >= config.max_search_queries_per_jurisdiction:
-        return None
+    manual_direct: list[str] = []
+    official = result.official_url
+    if result.planning_fallback_url:
+        diag.planning_fallback_used = "yes"
+        diag.planning_fallback_url = result.planning_fallback_url
+        manual_direct.append(normalize_url(result.planning_fallback_url))
+        if not official:
+            official = result.official_url
 
-    official = _search_official_site(j, fetcher, diag)
     if official and config.use_domain_cache:
-        save_domain_cache_entry(j, official, "search", domain_cache)
-    return official
+        method = result.resolver_method or "guess"
+        save_domain_cache_entry(j, official, method, domain_cache)
+    return official, manual_direct
 
 
 def _extract_page(
@@ -439,9 +421,12 @@ def harvest_jurisdiction(
             manual_direct.append(normalize_url(entry.url))
 
     hdiag = HarvestDiagnostics(manual_url_used="; ".join(manual_used))
-    official = _resolve_official_site(
+    official, planning_direct = _resolve_official_site(
         j, fetcher, manual_official, hdiag, config, domain_cache
     )
+    for url in planning_direct:
+        if url not in manual_direct:
+            manual_direct.append(url)
     hdiag.official_site_found = bool(official)
     if official:
         hdiag.official_domain = official_netloc(official)
@@ -500,7 +485,12 @@ def harvest_jurisdiction(
             reject_row(
                 j,
                 "no_official_site_found",
-                notes="Could not resolve official website (guess + one search)",
+                notes=(
+                    f"Could not resolve official website "
+                    f"(resolver={hdiag.resolver_method or 'none'}, "
+                    f"searches={hdiag.search_queries_run}, "
+                    f"rejections={hdiag.search_results_rejected})"
+                ),
                 diag=diag,
             ),
             diagnostics_row(j, hdiag, found=False),

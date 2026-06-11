@@ -14,6 +14,7 @@ data/prospects_working.csv
 data/prospects_rejected.csv
 data/harvest_diagnostics.csv
 data/review.html
+data/last_harvest_summary.json
 data/build_log.txt
 
 # Harvest config (optional)

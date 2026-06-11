@@ -9,12 +9,14 @@ from src.outreach_crm import (
     PREPARED_STATUS,
     SENT_STATUS,
     apply_send_side_effects,
+    classify_duplicate,
     is_duplicate_of_any,
     is_ready,
     merge_outreach_row,
     outreach_key,
     save_crm_rows,
 )
+from src.harvest_summary import PrepareStats
 from src.outreach_template import (
     DefaultMessage,
     apply_default_templates_to_row,
@@ -156,13 +158,41 @@ def _build_row_from_sources(
     return row
 
 
-def prepare_outreach(*, append_only: bool = False) -> tuple[int, int]:
-    """Merge working + diagnostics into outreach.csv. Returns (total_rows, new_rows)."""
+def prepare_outreach(*, append_only: bool = False) -> tuple[int, int, PrepareStats]:
+    """Merge working + diagnostics into outreach.csv. Returns (total_rows, new_rows, stats)."""
     existing_rows = read_outreach_rows()
     result: list[dict[str, str]] = [dict(r) for r in existing_rows]
     diag_lookup = _diagnostics_lookup()
-    candidates = _working_candidates()
-    new_count = 0
+    stats = PrepareStats()
+    working = read_csv(WORKING_CSV, WORKING_COLUMNS)
+    candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for row in working:
+        if row.get("jurisdiction_match_status") == "mismatch":
+            stats.mismatch_skipped += 1
+            continue
+        email = (row.get("email") or "").strip().lower()
+        if not email or is_generic_email(email):
+            stats.generic_skipped += 1
+            continue
+        if classify_email(email, row.get("contact_name", ""), True) != "direct":
+            stats.generic_skipped += 1
+            continue
+        if not row.get("contact_name"):
+            stats.generic_skipped += 1
+            continue
+        key = (
+            email,
+            row.get("state", "").upper(),
+            row.get("jurisdiction_name", "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(row)
+
+    stats.candidates_eligible = len(candidates)
 
     for working_row in candidates:
         key = (
@@ -174,25 +204,35 @@ def prepare_outreach(*, append_only: bool = False) -> tuple[int, int]:
         fresh = _build_row_from_sources(working_row, diag)
 
         matched_idx: int | None = None
+        dup_kind: str | None = None
         for i, existing in enumerate(result):
-            from src.outreach_crm import duplicate_match
-
-            if duplicate_match(existing, fresh):
+            kind = classify_duplicate(existing, fresh)
+            if kind:
                 matched_idx = i
+                dup_kind = kind
                 break
 
         if matched_idx is not None:
             result[matched_idx] = merge_outreach_row(result[matched_idx], fresh)
+            stats.merged_updates += 1
+            if dup_kind == "duplicate_email":
+                stats.duplicate_email += 1
+            elif dup_kind == "duplicate_contact_jurisdiction":
+                stats.duplicate_contact_jurisdiction += 1
+            elif dup_kind == "duplicate_source_name":
+                stats.duplicate_source_name += 1
+            elif dup_kind == "duplicate_email_jurisdiction":
+                stats.duplicate_email_jurisdiction += 1
             continue
 
         result.append(fresh)
-        new_count += 1
+        stats.new_added += 1
 
     if not append_only:
         result.sort(key=lambda r: (r.get("state", ""), r.get("jurisdiction_name", ""), r.get("email", "")))
 
     write_outreach_rows(result)
-    return len(result), new_count
+    return len(result), stats.new_added, stats
 
 
 def update_outreach_rows(updates: list[dict[str, str]]) -> None:

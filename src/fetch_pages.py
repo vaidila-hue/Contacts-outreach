@@ -68,6 +68,12 @@ def is_gov_url(url: str) -> bool:
     return host.endswith(".gov") or ".gov." in host
 
 
+def is_municipal_url(url: str) -> bool:
+    """True for common official municipal TLDs (.gov, .org, .us)."""
+    host = urlparse(url).netloc.lower()
+    return host.endswith((".gov", ".org", ".us"))
+
+
 def _response_html(resp: httpx.Response) -> str | None:
     if resp.status_code == 200:
         pass
@@ -290,20 +296,23 @@ def guess_official_urls(jurisdiction_name: str, state: str) -> list[str]:
         ]
 
     patterns = [
+        f"https://www.cityof{slug}.org",
+        f"https://cityof{slug}.org",
+        f"https://www.cityof{slug}.gov",
+        f"https://cityof{slug}.gov",
+        f"https://www.{slug}city.org",
+        f"https://{slug}city.org",
         f"https://www.{slug}{state_lower}.gov",
         f"https://{slug}{state_lower}.gov",
+        f"https://www.{slug}{state_lower}.org",
+        f"https://{slug}{state_lower}.org",
         f"https://www.{hyphen}-{state_lower}.gov",
         f"https://www.{slug}.gov",
         f"https://{slug}.gov",
+        f"https://www.{slug}.org",
+        f"https://{slug}.org",
         f"https://www.{slug}{state_lower}.us",
-        f"https://www.{slug}{state_lower}.org",
-        f"https://{slug}{state_lower}.org",
         f"https://www.{slug}{state_lower}.com",
-        f"https://www.cityof{slug}.gov",
-        f"https://cityof{slug}.gov",
-        f"https://www.cityof{slug}.org",
-        f"https://cityof{slug}.org",
-        f"https://www.cityof{slug}.com",
         f"https://cityof{slug}.com",
     ]
     seen: set[str] = set()

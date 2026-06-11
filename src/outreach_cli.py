@@ -29,7 +29,7 @@ from src.paths import OUTREACH_CSV
 
 
 def run_outreach_prepare() -> int:
-    total, new_rows = prepare_outreach()
+    total, new_rows, _stats = prepare_outreach()
     print(f"Prepared {total} outreach rows ({new_rows} new) -> {OUTREACH_CSV}")
     return 0
 
