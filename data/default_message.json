@@ -1,0 +1,5 @@
+{
+  "subject": "Question from a planner",
+  "body": "Hi {greeting_name},\r\n\r\nI'm an urban planner developing software to help towns and cities generate comprehensive plans faster and more affordably, driven by community goals and preferences.\r\n\r\nWould you be willing to share 10-15 minutes of candid feedback to help me understand what is needed, what would be considered useful, and what would make this genuinely helpful for local planning staff?\r\n\r\nYour experience and input would help shape something genuinely useful.\r\n\r\nThank you for considering this request.\r\n\r\nSincerely,\r\nVaidila",
+  "version": 1
+}

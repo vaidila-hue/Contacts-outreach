@@ -1,0 +1,32 @@
+# Local environment
+.env
+
+# Virtual environments
+.venv/
+
+# OAuth secrets
+credentials.json
+token.json
+
+# Outreach data
+data/outreach.csv
+data/prospects_working.csv
+data/prospects_rejected.csv
+data/harvest_diagnostics.csv
+data/review.html
+data/build_log.txt
+
+# Harvest config (optional)
+# data/harvest_config.json
+
+# Local caches
+data/cache/
+
+# Pytest
+.pytest_cache/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+data/build_log.txt
