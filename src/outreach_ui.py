@@ -12,6 +12,7 @@ from src.harvest_runner import run_find_more_contacts
 from src.outreach_cli import run_outreach_send_ready
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
+    delete_outreach_row,
     read_outreach_rows,
     row_message_templates,
     save_default_message_for_outreach,
@@ -41,10 +42,11 @@ PAGE_TEMPLATE = """
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Contacts Outreach CRM</title>
+  <title>Planzookie Outreach CRM</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
-    .dashboard { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
+    h1 { margin-bottom: 8px; }
+    .dashboard { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 12px; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
     .metric { min-width: 100px; }
     .metric strong { display: block; font-size: 20px; }
     .filters { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -53,14 +55,17 @@ PAGE_TEMPLATE = """
     table { border-collapse: collapse; width: 100%; font-size: 12px; }
     th, td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
     th { background: #f3f3f3; position: sticky; top: 0; z-index: 1; }
+    tbody tr.row-alt { background: #f7f7f7; }
     .actions { margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .actions button, .actions a.btn { padding: 8px 12px; cursor: pointer; text-decoration: none; color: #111; border: 1px solid #888; background: #fafafa; display: inline-block; font-size: 13px; }
     .status-sent { color: #0a0; font-weight: bold; }
     .status-failed { color: #a00; font-weight: bold; }
     input[type=text], input[type=datetime-local], select, textarea { width: 100%; min-width: 70px; box-sizing: border-box; font-size: 12px; }
     textarea { min-height: 48px; }
-    .msg { padding: 8px; background: #eef6ff; border: 1px solid #99c; margin-bottom: 12px; }
+    .msg { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; background: #eef6ff; border: 1px solid #99c; margin-bottom: 12px; }
+    .msg.hidden { display: none; }
     .msg.warn { background: #fff8e6; border-color: #cc9; }
+    .msg-dismiss { background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer; color: #444; padding: 0 4px; }
     .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10; }
     .modal-backdrop.open { display: flex; align-items: center; justify-content: center; }
     .modal { background: #fff; padding: 16px; border: 1px solid #888; max-width: 520px; width: 90%; max-height: 90vh; overflow: auto; }
@@ -70,8 +75,41 @@ PAGE_TEMPLATE = """
     .modal .row > div { flex: 1; }
     .modal textarea.body-field { min-height: 220px; }
     .link-btn { background: none; border: none; color: #06c; cursor: pointer; text-decoration: underline; padding: 0; font-size: 12px; }
+    .row-menu { position: relative; display: inline-block; }
+    .menu-trigger { background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 8px; color: #444; }
+    .menu-dropdown { display: none; position: absolute; right: 0; top: 100%; background: #fff; border: 1px solid #ccc; box-shadow: 0 2px 6px rgba(0,0,0,.12); z-index: 5; min-width: 110px; }
+    .row-menu.open .menu-dropdown { display: block; }
+    .menu-dropdown button { display: block; width: 100%; text-align: left; padding: 7px 12px; border: none; background: none; cursor: pointer; font-size: 12px; }
+    .menu-dropdown button:hover { background: #f0f0f0; }
+    .menu-delete { color: #a00; }
   </style>
   <script>
+    function closeRowMenus() {
+      document.querySelectorAll('.row-menu.open').forEach(function(el) { el.classList.remove('open'); });
+    }
+    function toggleRowMenu(idx, event) {
+      event.stopPropagation();
+      var menu = document.getElementById('row-menu-' + idx);
+      var wasOpen = menu.classList.contains('open');
+      closeRowMenus();
+      if (!wasOpen) menu.classList.add('open');
+    }
+    document.addEventListener('click', closeRowMenus);
+    function confirmDeleteRow(idx) {
+      closeRowMenus();
+      if (confirm('Remove this contact from the CRM? This cannot be undone.')) {
+        document.getElementById('delete-form-' + idx).submit();
+      }
+    }
+    function initFlashMessage() {
+      var flash = document.getElementById('flash-msg');
+      if (!flash) return;
+      var hide = function() { flash.classList.add('hidden'); };
+      var btn = flash.querySelector('.msg-dismiss');
+      if (btn) btn.addEventListener('click', hide);
+      setTimeout(hide, 5000);
+    }
+    document.addEventListener('DOMContentLoaded', initFlashMessage);
     function openDefaultMessageModal() {
       document.getElementById('default-message-modal').classList.add('open');
     }
@@ -84,8 +122,9 @@ PAGE_TEMPLATE = """
       document.getElementById('row-message-modal').classList.add('open');
     }
     function openDetailsModal(idx) {
+      closeRowMenus();
       ['jurisdiction_type','population','jurisdiction_url','email_source_url','first_reply_at',
-       'meeting_requested','meeting_scheduled_for','meeting_completed','follow_up_needed'].forEach(function(f) {
+       'follow_up_at','meeting_requested','meeting_scheduled_for','meeting_completed','follow_up_needed'].forEach(function(f) {
         var el = document.getElementById(f + '-' + idx);
         var target = document.getElementById('detail-' + f);
         if (el && target) {
@@ -99,27 +138,31 @@ PAGE_TEMPLATE = """
     function saveDetailsToRow() {
       var idx = document.getElementById('detail-row-idx').value;
       ['jurisdiction_type','population','jurisdiction_url','email_source_url','first_reply_at',
-       'meeting_scheduled_for'].forEach(function(f) {
+       'follow_up_at','meeting_scheduled_for'].forEach(function(f) {
         document.getElementById(f + '-' + idx).value = document.getElementById('detail-' + f).value;
       });
       document.getElementById('meeting_requested-' + idx).checked = document.getElementById('detail-meeting_requested').checked;
       document.getElementById('meeting_completed-' + idx).checked = document.getElementById('detail-meeting_completed').checked;
       document.getElementById('follow_up_needed-' + idx).checked = document.getElementById('detail-follow_up_needed').checked;
+      document.getElementById('follow_up_at-' + idx).value = document.getElementById('detail-follow_up_at').value;
       document.getElementById('details-modal').classList.remove('open');
     }
   </script>
 </head>
 <body>
-  <h1>Contacts Outreach CRM</h1>
-  <p>Ready contacts → send emails → track responses.</p>
-  {% if message %}<div class="msg">{{ message }}</div>{% endif %}
+  <h1>Planzookie Outreach CRM</h1>
+  {% if message %}
+  <div class="msg" id="flash-msg" role="status">
+    <span>{{ message }}</span>
+    <button type="button" class="msg-dismiss" aria-label="Dismiss">&times;</button>
+  </div>
+  {% endif %}
 
   <div class="dashboard">
     <div class="metric"><span>Contacts</span><strong>{{ stats.total }}</strong></div>
     <div class="metric"><span>Ready</span><strong>{{ stats.ready }}</strong></div>
     <div class="metric"><span>Sent</span><strong>{{ stats.sent }}</strong></div>
     <div class="metric"><span>Replies</span><strong>{{ stats.replies }}</strong></div>
-    <div class="metric"><span>Needs Follow-Up</span><strong>{{ stats.needs_follow_up }}</strong></div>
   </div>
 
   <div class="filters">
@@ -141,7 +184,7 @@ PAGE_TEMPLATE = """
       <thead>
         <tr>
           <th>Ready</th>
-          <th>Greeting</th>
+          <th>Email name</th>
           <th>Status</th>
           <th>Sent</th>
           <th>Jurisdiction</th>
@@ -150,7 +193,6 @@ PAGE_TEMPLATE = """
           <th>Title</th>
           <th>Email</th>
           <th>Reply</th>
-          <th>Follow-up</th>
           <th>Notes</th>
           <th>Message</th>
           <th></th>
@@ -159,7 +201,7 @@ PAGE_TEMPLATE = """
       <tbody>
         {% for row in rows %}
         {% set idx = loop.index0 %}
-        <tr>
+        <tr class="{% if loop.index0 is odd %}row-alt{% endif %}">
           <td>
             <input type="hidden" id="orig-email-{{ idx }}" name="_orig_email" value="{{ row._orig_email }}">
             <input type="hidden" id="orig-state-{{ idx }}" name="_orig_state" value="{{ row._orig_state }}">
@@ -183,14 +225,26 @@ PAGE_TEMPLATE = """
               {% endfor %}
             </select>
           </td>
-          <td><input type="text" name="follow_up_at_{{ idx }}" value="{{ row.follow_up_at }}"></td>
           <td><textarea name="outreach_notes_{{ idx }}" rows="2">{{ row.outreach_notes }}</textarea></td>
           <td>
             <input type="hidden" id="row-subject-{{ idx }}" value="{{ row.message_subject }}">
             <textarea hidden id="row-body-{{ idx }}">{{ row.message_body }}</textarea>
             <button type="button" class="link-btn" onclick="openRowMessageModal({{ idx }})">Email Message</button>
           </td>
-          <td><button type="button" class="link-btn" onclick="openDetailsModal({{ idx }})">Details</button></td>
+          <td>
+            <div class="row-menu" id="row-menu-{{ idx }}">
+              <button type="button" class="menu-trigger" onclick="toggleRowMenu({{ idx }}, event)" aria-label="Row actions">&#8942;</button>
+              <div class="menu-dropdown">
+                <button type="button" onclick="openDetailsModal({{ idx }})">Details</button>
+                <button type="button" class="menu-delete" onclick="confirmDeleteRow({{ idx }})">Delete</button>
+              </div>
+            </div>
+            <form id="delete-form-{{ idx }}" method="post" action="{{ url_for('delete_row') }}" style="display:none">
+              <input type="hidden" name="orig_email" value="{{ row._orig_email }}">
+              <input type="hidden" name="orig_state" value="{{ row._orig_state }}">
+              <input type="hidden" name="orig_jurisdiction_name" value="{{ row._orig_jurisdiction_name }}">
+            </form>
+          </td>
           <input type="hidden" id="jurisdiction_type-{{ idx }}" name="jurisdiction_type_{{ idx }}" value="{{ row.jurisdiction_type }}">
           <input type="hidden" id="population-{{ idx }}" name="population_{{ idx }}" value="{{ row.population }}">
           <input type="hidden" id="jurisdiction_url-{{ idx }}" name="jurisdiction_url_{{ idx }}" value="{{ row.jurisdiction_url }}">
@@ -200,6 +254,7 @@ PAGE_TEMPLATE = """
           <input type="checkbox" hidden id="meeting_requested-{{ idx }}" name="meeting_requested_{{ idx }}" value="yes" {% if row.meeting_requested == 'yes' %}checked{% endif %}>
           <input type="checkbox" hidden id="meeting_completed-{{ idx }}" name="meeting_completed_{{ idx }}" value="yes" {% if row.meeting_completed == 'yes' %}checked{% endif %}>
           <input type="checkbox" hidden id="follow_up_needed-{{ idx }}" name="follow_up_needed_{{ idx }}" value="yes" {% if row.follow_up_needed == 'yes' %}checked{% endif %}>
+          <input type="hidden" id="follow_up_at-{{ idx }}" name="follow_up_at_{{ idx }}" value="{{ row.follow_up_at }}">
         </tr>
         {% endfor %}
       </tbody>
@@ -263,6 +318,8 @@ PAGE_TEMPLATE = """
       <input type="checkbox" id="detail-meeting_completed" value="yes">
       <label>Follow-up needed</label>
       <input type="checkbox" id="detail-follow_up_needed" value="yes">
+      <label>Follow-up date</label>
+      <input type="text" id="detail-follow_up_at">
       <div class="actions">
         <button type="button" onclick="document.getElementById('details-modal').classList.remove('open')">Cancel</button>
         <button type="button" onclick="saveDetailsToRow()">Apply to row</button>
@@ -473,6 +530,17 @@ def create_app() -> Flask:
         update_outreach_rows(updates)
         filter_name = request.args.get("filter", "all")
         return redirect(url_for("index", filter=filter_name, msg="Saved changes."))
+
+    @app.post("/row/delete")
+    def delete_row():
+        ok = delete_outreach_row(
+            request.form.get("orig_email", ""),
+            request.form.get("orig_state", ""),
+            request.form.get("orig_jurisdiction_name", ""),
+        )
+        filter_name = request.args.get("filter", "all")
+        msg = "Contact removed." if ok else "Contact not found."
+        return redirect(url_for("index", filter=filter_name, msg=msg))
 
     @app.post("/harvest-config/save")
     def save_harvest_config():

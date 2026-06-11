@@ -64,7 +64,7 @@ def test_is_crm_server_running_detects_flask_app():
             with patch("src.outreach_launch.urllib.request.urlopen") as mock_urlopen:
                 mock_urlopen.return_value.__enter__.return_value.status = 200
                 mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                    b"<title>Contacts Outreach CRM</title>"
+                    b"<title>Planzookie Outreach CRM</title>"
                 )
                 assert is_crm_server_running() is True
 

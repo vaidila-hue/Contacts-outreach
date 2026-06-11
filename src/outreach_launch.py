@@ -13,7 +13,7 @@ from src.paths import OUTREACH_PORT
 CRM_HOST = "127.0.0.1"
 CRM_PUBLIC_HOST = "localhost"
 CRM_URL = f"http://{CRM_PUBLIC_HOST}:{OUTREACH_PORT}"
-CRM_TITLE_MARKER = b"Contacts Outreach CRM"
+CRM_TITLE_MARKER = b"Planzookie Outreach CRM"
 
 
 class PortInUseError(RuntimeError):

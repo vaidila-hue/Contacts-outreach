@@ -202,6 +202,21 @@ def update_outreach_rows(updates: list[dict[str, str]]) -> None:
     write_outreach_rows(updated)
 
 
+def delete_outreach_row(orig_email: str, orig_state: str, orig_jurisdiction: str) -> bool:
+    """Remove one outreach row by its original key."""
+    rows = read_outreach_rows()
+    key = (
+        orig_email.strip().lower(),
+        orig_state.strip().upper(),
+        orig_jurisdiction.strip(),
+    )
+    kept = [r for r in rows if outreach_key(r) != key]
+    if len(kept) == len(rows):
+        return False
+    write_outreach_rows(kept)
+    return True
+
+
 def is_approved(row: dict[str, str]) -> bool:
     return (row.get("approved") or "").strip().lower() in ("yes", "true", "1")
 

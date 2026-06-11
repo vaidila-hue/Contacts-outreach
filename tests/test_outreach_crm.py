@@ -168,13 +168,13 @@ def test_dashboard_metrics(crm_paths):
     rows[0]["approved"] = "yes"
     rows[0]["send_status"] = "sent"
     rows[0]["reply_status"] = "replied"
-    rows[0]["follow_up_needed"] = "yes"
+    rows[0]["reply_status"] = "replied"
     stats = compute_dashboard(rows)
     assert stats["total"] == 1
     assert stats["ready"] == 0
     assert stats["sent"] == 1
     assert stats["replies"] == 1
-    assert stats["needs_follow_up"] == 1
+    assert "needs_follow_up" not in stats
 
 
 def test_filters():

@@ -1,5 +1,5 @@
 {
   "subject": "Question from a planner",
-  "body": "Hi {greeting_name},\r\n\r\nI'm an urban planner developing software to help towns and cities generate comprehensive plans faster and more affordably, driven by community goals and preferences.\r\n\r\nWould you be willing to share 10-15 minutes of candid feedback to help me understand what is needed, what would be considered useful, and what would make this genuinely helpful for local planning staff?\r\n\r\nYour experience and input would help shape something genuinely useful.\r\n\r\nThank you for considering this request.\r\n\r\nSincerely,\r\nVaidila",
-  "version": 1
+  "body": "Hi {greeting_name},\r\n\r\nI'm an urban planner working on a new approach to help towns and cities develop comprehensive plans faster and more affordably while still reflecting local goals and community priorities.\r\n\r\nI'm reaching out because I'd value the perspective of someone actively working in local government planning. Would you be willing to share 5\u201310 minutes of candid feedback about your experience with comprehensive planning\u2014what works well, where the process becomes difficult, and what would make the greatest difference for municipal staff?\r\n\r\nI'm not selling anything. I'm simply trying to better understand the realities planners face so I can build something genuinely useful.\r\n\r\nThank you for considering the request, and I appreciate the work you do for your community.\r\n\r\nSincerely,\r\n\r\nVaidila Satvika, AICP",
+  "version": 4
 }

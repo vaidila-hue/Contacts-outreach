@@ -11,6 +11,7 @@ from src.gmail_client import MockGmailService
 from src.outreach_cli import run_outreach_send_ready
 from src.outreach_crm import FILTER_OPTIONS, format_sent_date_display, is_ready, row_matches_filter
 from src.outreach_store import (
+    delete_outreach_row,
     prepare_outreach,
     read_outreach_rows,
     ready_send_candidates,
@@ -93,9 +94,19 @@ def test_sent_filter_includes_sent_only():
 def test_filters_simplified():
     labels = [label for _, label in FILTER_OPTIONS]
     assert "Ready" in labels
+    assert "Not Sent" in labels
     assert "Not Approved" not in labels
     assert "Prepared" not in labels
     assert "Drafted" not in labels
+    assert "Needs Follow-Up" not in labels
+
+
+def test_not_sent_filter():
+    assert row_matches_filter({"send_status": "prepared", "approved": ""}, "not_sent")
+    assert row_matches_filter({"send_status": "prepared", "approved": "yes"}, "not_sent")
+    assert not row_matches_filter({"send_status": "sent"}, "not_sent")
+    assert row_matches_filter({"send_status": "prepared", "approved": "yes"}, "ready")
+    assert not row_matches_filter({"send_status": "prepared", "approved": ""}, "ready")
 
 
 def test_sent_date_display_format():
@@ -191,8 +202,49 @@ def test_ui_renders_simplified_controls(crm_paths):
         resp = client.get("/")
         html = resp.data.decode("utf-8")
         assert resp.status_code == 200
+        assert "Planzookie Outreach CRM" in html
+        assert "Ready contacts → send emails" not in html
+        assert "Email name" in html
+        assert "Greeting" not in html
+        assert "Follow-up</th>" not in html
+        assert "Needs Follow-Up" not in html
         assert "Send Ready Emails" in html
         assert "Default Message" in html
+        assert "row-menu" in html
+        assert "menu-dropdown" in html
+        assert ">Details</button>" in html
+        assert "menu-delete" in html
+        assert "flash-msg" in html
+        assert "msg-dismiss" in html
+        assert "row-alt" in html
+        assert "initFlashMessage" in html
         assert "Create draft for next approved row" not in html
-        assert "Dry-run next draft" not in html
-        assert "Not Approved" not in html
+
+
+def test_delete_row_removes_contact(crm_paths):
+    working, _, _ = crm_paths
+    write_csv(working, [_working_row()], WORKING_COLUMNS)
+    prepare_outreach()
+    assert delete_outreach_row("ndevaughn@fortmyers.gov", "FL", "Fort Myers")
+    assert read_outreach_rows() == []
+
+
+def test_delete_row_route(crm_paths):
+    working, _, _ = crm_paths
+    write_csv(working, [_working_row()], WORKING_COLUMNS)
+    prepare_outreach()
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.post(
+            "/row/delete",
+            data={
+                "orig_email": "ndevaughn@fortmyers.gov",
+                "orig_state": "FL",
+                "orig_jurisdiction_name": "Fort Myers",
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Contact removed" in resp.data
+    assert read_outreach_rows() == []

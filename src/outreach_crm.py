@@ -57,9 +57,9 @@ REPLY_COUNTS_AS_REPLY = frozenset(
 FILTER_OPTIONS = (
     ("all", "Show All"),
     ("ready", "Ready"),
+    ("not_sent", "Not Sent"),
     ("sent", "Sent"),
     ("replied", "Replied"),
-    ("needs_follow_up", "Needs Follow-Up"),
     ("meeting_scheduled", "Meeting Scheduled"),
     ("meeting_completed", "Meeting Completed"),
 )
@@ -217,7 +217,6 @@ def compute_dashboard(rows: list[dict[str, str]]) -> dict[str, int]:
         "replies": 0,
         "meetings_scheduled": 0,
         "meetings_completed": 0,
-        "needs_follow_up": 0,
     }
     for row in rows:
         if is_ready(row):
@@ -236,8 +235,6 @@ def compute_dashboard(rows: list[dict[str, str]]) -> dict[str, int]:
             "1",
         ):
             stats["meetings_completed"] += 1
-        if (row.get("follow_up_needed") or "").lower() in ("yes", "true", "1"):
-            stats["needs_follow_up"] += 1
     return stats
 
 
@@ -251,6 +248,8 @@ def row_matches_filter(row: dict[str, str], filter_name: str) -> bool:
         return is_ready(row)
     if filter_name == "approved":
         return is_ready(row)
+    if filter_name == "not_sent":
+        return status != SENT_STATUS
     if filter_name == "sent":
         return status == SENT_STATUS
     if filter_name == "replied":
