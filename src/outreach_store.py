@@ -7,6 +7,8 @@ from src.extract_emails import classify_email, is_generic_email
 from src.greeting_name import greeting_name_from_contact_name
 from src.outreach_crm import (
     PREPARED_STATUS,
+    QUEUED_STATUS,
+    SENDING_STATUS,
     SENT_STATUS,
     apply_send_side_effects,
     classify_duplicate,
@@ -272,7 +274,16 @@ def is_approved(row: dict[str, str]) -> bool:
     return (row.get("approved") or "").strip().lower() in ("yes", "true", "1")
 
 
+def is_valid_email_address(email: str) -> bool:
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        return False
+    local, _, domain = email.partition("@")
+    return bool(local.strip()) and bool(domain.strip()) and "." in domain
+
+
 def is_outreach_sendable(row: dict[str, str]) -> bool:
+    """Harvest/draft eligibility: requires a non-generic direct email."""
     email = (row.get("email") or "").strip().lower()
     if not email or is_generic_email(email):
         return False
@@ -284,18 +295,51 @@ def is_outreach_sendable(row: dict[str, str]) -> bool:
     return True
 
 
+def is_manually_sendable(row: dict[str, str]) -> bool:
+    """Manual CRM queue/send: any syntactically valid email if Ready."""
+    email = (row.get("email") or "").strip().lower()
+    if not is_valid_email_address(email):
+        return False
+    subject, body = render_row_email(row)
+    if not subject.strip():
+        return False
+    if not body.strip():
+        return False
+    return True
+
+
+def row_has_generic_email(row: dict[str, str]) -> bool:
+    email = (row.get("email") or "").strip().lower()
+    return bool(email) and is_generic_email(email)
+
+
+def ready_queue_skip_reason(row: dict[str, str]) -> str | None:
+    """Why an approved row cannot be queued, or None if eligible."""
+    if not is_approved(row):
+        return None
+    status = row.get("send_status") or ""
+    if status == SENT_STATUS:
+        return "already sent"
+    if status == QUEUED_STATUS:
+        return "already queued"
+    if status == SENDING_STATUS:
+        return "currently sending"
+    email = (row.get("email") or "").strip().lower()
+    if not email:
+        return "missing email"
+    if not is_valid_email_address(email):
+        return "invalid email"
+    subject, body = render_row_email(row)
+    if not subject.strip():
+        return "missing subject"
+    if not body.strip():
+        return "missing message"
+    return None
+
+
 def ready_send_candidates(rows: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     rows = rows if rows is not None else read_outreach_rows()
-    candidates: list[dict[str, str]] = []
-    for row in rows:
-        if not is_ready(row):
-            continue
-        if row.get("send_status") == SENT_STATUS:
-            continue
-        if not is_outreach_sendable(row):
-            continue
-        candidates.append(row)
-    return candidates
+    return [row for row in rows if is_ready(row) and ready_queue_skip_reason(row) is None]
 
 
 def save_default_message_for_outreach(subject: str, body: str) -> DefaultMessage:

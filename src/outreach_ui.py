@@ -27,6 +27,7 @@ from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date
 from src.outreach_store import (
     delete_outreach_row,
     read_outreach_rows,
+    row_has_generic_email,
     row_message_templates,
     save_default_message_for_outreach,
     save_row_message as persist_row_message,
@@ -269,7 +270,7 @@ PAGE_TEMPLATE = """
               {% if row.send_status in ('sent', 'queued', 'sending') %}disabled{% endif %}>
           </td>
           <td><input type="text" name="greeting_name_{{ idx }}" value="{{ row.greeting_name }}"></td>
-          <td class="{% if row.send_status == 'sent' %}status-sent{% elif row.send_status in ('failed',) %}status-failed{% elif row.send_status == 'queued' %}status-queued{% endif %}">{{ row.send_status or 'prepared' }}</td>
+          <td class="{% if row.send_status == 'sent' %}status-sent{% elif row.send_status in ('failed',) %}status-failed{% elif row.send_status == 'queued' %}status-queued{% endif %}">{{ row.send_status or 'prepared' }}{% if row.status_note %}<br><small class="status-note">{{ row.status_note }}</small>{% endif %}</td>
           <td>{{ row.sent_at_display }}</td>
           <td><input type="text" name="jurisdiction_name_{{ idx }}" value="{{ row.jurisdiction_name }}"></td>
           <td><input type="text" name="state_{{ idx }}" value="{{ row.state }}" maxlength="2" style="max-width:40px"></td>
@@ -556,6 +557,17 @@ def _display_rows(all_rows: list[dict[str, str]], filter_name: str) -> list[dict
         display["_orig_state"] = row.get("state", "")
         display["_orig_jurisdiction_name"] = row.get("jurisdiction_name", "")
         display["sent_at_display"] = format_sent_date_display(row.get("sent_at", ""))
+        err = (row.get("send_error") or "").strip()
+        if err.startswith("Not queued:"):
+            display["status_note"] = err
+        elif row_has_generic_email(row) and (row.get("send_status") or "") in (
+            "prepared",
+            "queued",
+            "sending",
+        ):
+            display["status_note"] = "Generic email"
+        else:
+            display["status_note"] = ""
         subject, body = row_message_templates(row)
         display["message_subject"] = subject
         display["message_body"] = body
@@ -725,10 +737,8 @@ def create_app(*, start_worker: bool = False) -> Flask:
         updates = _parse_form_updates()
         if updates:
             update_outreach_rows(updates)
-        count, msg = queue_ready_contacts()
-        if count == 0:
-            return redirect(url_for("index", msg=msg))
-        return redirect(url_for("index", msg=msg))
+        result = queue_ready_contacts()
+        return redirect(url_for("index", msg=result.format_message()))
 
     @app.post("/send-queue/settings")
     def save_send_queue_settings():

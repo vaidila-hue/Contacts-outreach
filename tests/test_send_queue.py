@@ -121,8 +121,7 @@ def _prepare_four_ready_rows(queue_paths):
 def test_queue_ready_does_not_send_immediately(queue_paths):
     _prepare_ready_row(queue_paths)
     service = MockGmailService()
-    count, _ = queue_ready_contacts()
-    assert count == 1
+    assert queue_ready_contacts().queued == 1
     assert service.sent == []
     rows = read_outreach_rows()
     assert rows[0]["send_status"] == "queued"
@@ -350,8 +349,7 @@ def test_dashboard_shows_cadence_and_limits(queue_paths):
 def test_queue_four_rows_does_not_send_immediately(queue_paths):
     _prepare_four_ready_rows(queue_paths)
     service = MockGmailService()
-    count, _ = queue_ready_contacts()
-    assert count == 4
+    assert queue_ready_contacts().queued == 4
     assert len(service.sent) == 0
     assert len(queued_rows()) == 4
 

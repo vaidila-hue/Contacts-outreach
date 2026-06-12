@@ -155,6 +155,6 @@ def run_outreach_send_ready(args: argparse.Namespace, service: GmailService | No
     """Queue all Ready contacts for throttled sending (does not send immediately)."""
     from src.send_queue import queue_ready_contacts
 
-    count, message = queue_ready_contacts()
-    print(message)
-    return 0 if count >= 0 else 1
+    result = queue_ready_contacts()
+    print(result.format_message())
+    return 0

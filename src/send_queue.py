@@ -6,7 +6,8 @@ import json
 import random
 import threading
 import uuid
-from dataclasses import asdict, dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from src.gmail_client import GmailService, build_gmail_service, verify_gmail_account
@@ -15,10 +16,12 @@ from src.outreach_crm import SENT_STATUS
 from src.outreach_store import (
     apply_failure,
     apply_send_result,
-    is_outreach_sendable,
+    is_manually_sendable,
     outreach_key,
     read_outreach_rows,
+    ready_queue_skip_reason,
     ready_send_candidates,
+    row_has_generic_email,
     write_outreach_rows,
 )
 from src.outreach_template import render_row_email
@@ -42,6 +45,38 @@ MAX_EMAILS_PER_DAY = DEFAULT_MAX_PER_DAY
 MAX_EMAILS_PER_HOUR = DEFAULT_MAX_PER_HOUR
 
 _send_lock = threading.Lock()
+
+
+@dataclass
+class SkippedReadyContact:
+    jurisdiction_name: str
+    state: str
+    email: str
+    reason: str
+
+
+@dataclass
+class QueueReadyResult:
+    queued: int
+    skipped: list[SkippedReadyContact] = field(default_factory=list)
+    generic_warning_count: int = 0
+
+    def format_message(self) -> str:
+        parts: list[str] = []
+        if self.queued:
+            parts.append(f"Queued {self.queued} contact(s)")
+        if self.generic_warning_count:
+            noun = "address" if self.generic_warning_count == 1 else "addresses"
+            parts.append(
+                f"Warning: {self.generic_warning_count} generic email {noun}"
+            )
+        if self.skipped:
+            counts = Counter(s.reason for s in self.skipped)
+            detail = ", ".join(f"{count} {reason}" for reason, count in sorted(counts.items()))
+            parts.append(f"Skipped {len(self.skipped)} contact(s): {detail}")
+        if not parts:
+            return "No Ready contacts to queue."
+        return ". ".join(parts) + "."
 
 
 @dataclass
@@ -152,12 +187,40 @@ def rate_limits_exceeded(
     return False, ""
 
 
-def queue_ready_contacts() -> tuple[int, str]:
+def queue_ready_contacts() -> QueueReadyResult:
     """Add Ready unsent contacts to queue; does not send immediately."""
     rows = read_outreach_rows()
+    skipped: list[SkippedReadyContact] = []
+    skip_keys: set[tuple[str, str, str]] = set()
+    for row in rows:
+        reason = ready_queue_skip_reason(row)
+        if not reason:
+            continue
+        skipped.append(
+            SkippedReadyContact(
+                jurisdiction_name=row.get("jurisdiction_name", ""),
+                state=row.get("state", ""),
+                email=row.get("email", ""),
+                reason=reason,
+            )
+        )
+        skip_keys.add(outreach_key(row))
+
     candidates = ready_send_candidates(rows)
+    if not candidates and not skipped:
+        return QueueReadyResult(queued=0)
+
+    for row in rows:
+        key = outreach_key(row)
+        if key not in skip_keys:
+            continue
+        reason = ready_queue_skip_reason(row)
+        if reason:
+            row["send_error"] = f"Not queued: {reason}"
+
     if not candidates:
-        return 0, "No Ready contacts to queue."
+        write_outreach_rows(rows)
+        return QueueReadyResult(queued=0, skipped=skipped)
 
     state = SendQueueState.load()
     batch_id = str(uuid.uuid4())
@@ -165,9 +228,12 @@ def queue_ready_contacts() -> tuple[int, str]:
     prior_queued_count = len(queued_rows(rows))
     keys = {outreach_key(c) for c in candidates}
     queued = 0
+    generic_warnings = 0
     for row in rows:
         if outreach_key(row) not in keys:
             continue
+        if row_has_generic_email(row):
+            generic_warnings += 1
         row["send_status"] = QUEUED_STATUS
         row["queued_at"] = now
         row["queue_batch_id"] = batch_id
@@ -182,7 +248,11 @@ def queue_ready_contacts() -> tuple[int, str]:
     state.pause_reason = ""
     state.consecutive_errors = 0
     state.save()
-    return queued, f"Queued {queued} contact(s) for throttled sending."
+    return QueueReadyResult(
+        queued=queued,
+        skipped=skipped,
+        generic_warning_count=generic_warnings,
+    )
 
 
 def pause_queue(reason: str = "paused by user") -> None:
@@ -242,7 +312,7 @@ def _mark_sending(row: dict[str, str]) -> None:
 def _send_row(service: GmailService, row: dict[str, str]) -> None:
     if row.get("send_status") == SENT_STATUS:
         return
-    if not is_outreach_sendable(row):
+    if not is_manually_sendable(row):
         raise ValueError("invalid email or blank subject/body")
     subject, body = render_row_email(row)
     _mark_sending(row)
