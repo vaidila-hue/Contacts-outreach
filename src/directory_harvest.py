@@ -26,7 +26,7 @@ from src.extract_contacts import (
     select_best_contact,
 )
 from src.extract_emails import classify_email, extract_emails_from_text, is_generic_email
-from src.fetch_pages import PageFetcher
+from src.fetch_pages import PageFetcher, fetch_profile_for_page_kind, format_fetch_failures
 from src.harvest_config import HarvestConfig
 from src.jurisdiction_validation import validate_jurisdiction_match
 from src.manual_urls import ManualUrlEntry
@@ -121,6 +121,9 @@ class HarvestDiagnostics:
     search_results_rejected: int = 0
     planning_fallback_used: str = "no"
     planning_fallback_url: str = ""
+    planning_fallback_attempted: str = "no"
+    planning_fallback_success: str = "no"
+    fetch_failures_by_url: str = ""
 
 
 def diagnostics_row(
@@ -159,6 +162,9 @@ def diagnostics_row(
         "search_results_rejected": str(hdiag.search_results_rejected),
         "planning_fallback_used": hdiag.planning_fallback_used,
         "planning_fallback_url": hdiag.planning_fallback_url,
+        "planning_fallback_attempted": hdiag.planning_fallback_attempted,
+        "planning_fallback_success": hdiag.planning_fallback_success,
+        "fetch_failures_by_url": hdiag.fetch_failures_by_url,
     }
 
 
@@ -267,6 +273,34 @@ def _high_confidence_found(candidates: list[ContactCandidate], official: str) ->
     return None
 
 
+def _process_fetched_page(
+    html: str,
+    url: str,
+    page_kind: str,
+    official: str,
+    hdiag: HarvestDiagnostics,
+    candidates: list[ContactCandidate],
+    source_urls: list[str],
+    *,
+    planning_url: str,
+) -> str:
+    """Extract contacts from a fetched page; return updated planning_url."""
+    if page_kind == "planning" or classify_page_url(url) == "planning":
+        hdiag.planning_pages_found += 1
+        hdiag.planning_page_found = True
+        if not planning_url:
+            planning_url = url
+    elif page_kind == "directory" or classify_page_url(url) == "directory":
+        hdiag.directory_pages_found += 1
+        if not planning_url:
+            planning_url = url
+    elif page_kind == "manual" and not planning_url:
+        planning_url = url
+
+    _extract_page(html, url, official, hdiag, candidates, source_urls, page_kind=page_kind)
+    return planning_url
+
+
 def _crawl_official_site(
     official: str,
     manual_direct: list[str],
@@ -282,6 +316,7 @@ def _crawl_official_site(
     profile_pages_fetched = 0
     planning_pages_fetched = 0
     directory_pages_fetched = 0
+    fetched_urls: set[str] = set()
     queued: set[str] = set()
     heap: list[tuple[int, int, str, str]] = []
     seq = 0
@@ -289,7 +324,7 @@ def _crawl_official_site(
     def push(url: str, page_kind: str, link_text: str = "") -> None:
         nonlocal seq
         normalized = normalize_url(url)
-        if not normalized or normalized in queued:
+        if not normalized or normalized in queued or normalized in fetched_urls:
             return
         queued.add(normalized)
         priority = crawl_priority(normalized, link_text, official, kind=page_kind)
@@ -298,28 +333,29 @@ def _crawl_official_site(
         heapq.heappush(heap, (-priority, seq, normalized, page_kind))
         seq += 1
 
-    for url in manual_direct:
-        push(url, "manual")
-    for url, kind in _probe_urls(official):
-        push(url, kind)
-
-    while heap:
+    def fetch_and_process(url: str, page_kind: str) -> str | None:
+        nonlocal pages_fetched, profile_pages_fetched, planning_pages_fetched
+        nonlocal directory_pages_fetched, planning_url
         if pages_fetched >= config.max_pages_per_jurisdiction:
             hdiag.max_page_limit_hit = "yes"
-            break
-
-        _, _, url, page_kind = heapq.heappop(heap)
+            return None
         if page_kind == "profile" and profile_pages_fetched >= config.max_profile_pages_per_jurisdiction:
-            continue
+            return None
         if page_kind == "planning" and planning_pages_fetched >= MAX_PLANNING_PAGE_FETCHES:
-            continue
+            return None
         if page_kind == "directory" and directory_pages_fetched >= config.max_directory_pages_per_jurisdiction:
-            continue
+            return None
 
-        html = fetcher.fetch_html(url)
+        profile = fetch_profile_for_page_kind(page_kind)
+        if page_kind == "manual":
+            hdiag.planning_fallback_attempted = "yes"
+        html = fetcher.fetch_html(url, profile=profile)
+        if page_kind == "manual" and html:
+            hdiag.planning_fallback_success = "yes"
         if not html:
-            continue
+            return None
 
+        fetched_urls.add(url)
         pages_fetched += 1
         if page_kind == "planning":
             planning_pages_fetched += 1
@@ -329,17 +365,37 @@ def _crawl_official_site(
         if page_kind == "directory":
             directory_pages_fetched += 1
 
-        if classify_page_url(url) == "planning" or page_kind == "planning":
-            hdiag.planning_pages_found += 1
-            hdiag.planning_page_found = True
-            if not planning_url:
-                planning_url = url
-        elif classify_page_url(url) == "directory" or page_kind == "directory":
-            hdiag.directory_pages_found += 1
-            if not planning_url:
-                planning_url = url
+        planning_url = _process_fetched_page(
+            html, url, page_kind, official, hdiag, candidates, source_urls, planning_url=planning_url
+        )
+        return html
 
-        _extract_page(html, url, official, hdiag, candidates, source_urls, page_kind=page_kind)
+    # Prefetch planning-fallback / manual URLs first so they cannot be skipped by heap limits.
+    for url in manual_direct:
+        normalized = normalize_url(url)
+        if not normalized:
+            continue
+        queued.add(normalized)
+        html = fetch_and_process(normalized, "manual")
+        if html and _high_confidence_found(candidates, official):
+            hdiag.early_stop = "yes"
+            hdiag.pages_fetched_count = pages_fetched
+            return planning_url
+
+    for url, kind in _probe_urls(official):
+        push(url, kind)
+
+    while heap:
+        if pages_fetched >= config.max_pages_per_jurisdiction:
+            hdiag.max_page_limit_hit = "yes"
+            break
+
+        _, _, url, page_kind = heapq.heappop(heap)
+        if url in fetched_urls:
+            continue
+        html = fetch_and_process(url, page_kind)
+        if not html:
+            continue
 
         if _high_confidence_found(candidates, official):
             hdiag.early_stop = "yes"
@@ -460,6 +516,7 @@ def harvest_jurisdiction(
         hdiag.cache_misses = fstats.cache_misses
         hdiag.timeout_count = fstats.timeout_count
         hdiag.fetch_error_count = fstats.fetch_error_count
+        hdiag.fetch_failures_by_url = format_fetch_failures(fstats.fetch_failures)
     hdiag.elapsed_seconds = time.monotonic() - started
 
     diag = DiscoverDiagnostics(

@@ -212,4 +212,7 @@ DIAGNOSTICS_COLUMNS = [
     "search_results_rejected",
     "planning_fallback_used",
     "planning_fallback_url",
+    "planning_fallback_attempted",
+    "planning_fallback_success",
+    "fetch_failures_by_url",
 ]

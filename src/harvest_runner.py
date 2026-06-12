@@ -122,7 +122,10 @@ def _run_find_more_contacts_impl() -> HarvestRunSummary:
         fetch_cache_ttl_days=mode.harvest.fetch_cache_ttl_days,
         connect_timeout=5.0,
         read_timeout=10.0,
-        max_retries=2 if mode.deep else 1,
+        max_retries=2 if mode.deep else 2,
+        planning_connect_timeout=8.0,
+        planning_read_timeout=20.0,
+        planning_max_retries=3,
     ) as fetcher:
         domain_cache = load_domain_cache()
         for j in pending:

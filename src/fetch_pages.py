@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -19,6 +19,19 @@ from src.url_utils import normalize_url
 
 _robots_cache: dict[str, RobotFileParser | None] = {}
 
+RETRYABLE_HTTP_STATUS = frozenset({429, 502, 503, 504})
+
+
+@dataclass
+class FetchFailureRecord:
+    url: str
+    http_status: int = 0
+    error_type: str = ""
+    redirect_chain: str = ""
+    content_type: str = ""
+    rejection_reason: str = ""
+    attempts: int = 0
+
 
 @dataclass
 class JurisdictionFetchStats:
@@ -26,6 +39,15 @@ class JurisdictionFetchStats:
     cache_misses: int = 0
     timeout_count: int = 0
     fetch_error_count: int = 0
+    fetch_failures: list[FetchFailureRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _FetchProfileSettings:
+    connect_timeout: float
+    read_timeout: float
+    max_retries: int
+    retry_backoff_seconds: float
 
 
 def _cache_key(url: str) -> str:
@@ -74,19 +96,30 @@ def is_municipal_url(url: str) -> bool:
     return host.endswith((".gov", ".org", ".us"))
 
 
-def _response_html(resp: httpx.Response) -> str | None:
+def _redirect_chain(resp: httpx.Response) -> str:
+    chain = [str(r.url) for r in resp.history]
+    chain.append(str(resp.url))
+    return " -> ".join(chain)
+
+
+def _response_html(resp: httpx.Response) -> tuple[str | None, str]:
+    """Return (html or None, rejection_reason)."""
+    content_type = resp.headers.get("content-type", "")
     if resp.status_code == 200:
         pass
     elif resp.status_code == 403 and len(resp.text) > 2000:
         lower = resp.text.lower()
         if "just a moment" in lower or "403 - forbidden" in lower[:500]:
-            return None
+            return None, "blocked_403_challenge"
+    elif resp.status_code in RETRYABLE_HTTP_STATUS:
+        return None, f"retryable_http_{resp.status_code}"
     else:
-        return None
-    content_type = resp.headers.get("content-type", "")
+        return None, f"http_{resp.status_code}"
     if "html" not in content_type and "text" not in content_type:
-        return None
-    return resp.text
+        return None, f"not_html:{content_type or 'unknown'}"
+    if not resp.text.strip():
+        return None, "empty_body"
+    return resp.text, ""
 
 
 class PageFetcher:
@@ -100,20 +133,35 @@ class PageFetcher:
         connect_timeout: float = 5.0,
         read_timeout: float = 10.0,
         max_retries: int = 1,
+        planning_connect_timeout: float = 8.0,
+        planning_read_timeout: float = 20.0,
+        planning_max_retries: int = 3,
     ):
         self.delay = delay
         self.force_refresh = force_refresh
         self.use_fetch_cache = use_fetch_cache
         self.fetch_cache_ttl_days = fetch_cache_ttl_days
-        self.max_retries = max(0, max_retries)
-        timeout = httpx.Timeout(connect=connect_timeout, read=read_timeout, write=read_timeout, pool=connect_timeout)
+        self._profiles = {
+            "default": _FetchProfileSettings(
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                max_retries=max(0, max_retries),
+                retry_backoff_seconds=1.0,
+            ),
+            "planning": _FetchProfileSettings(
+                connect_timeout=planning_connect_timeout,
+                read_timeout=planning_read_timeout,
+                max_retries=max(0, planning_max_retries),
+                retry_backoff_seconds=1.5,
+            ),
+        }
         self.client = httpx.Client(
             headers={"User-Agent": USER_AGENT},
             follow_redirects=True,
-            timeout=timeout,
+            timeout=httpx.Timeout(connect=connect_timeout, read=read_timeout, write=read_timeout, pool=connect_timeout),
         )
         self._last_request = 0.0
-        self._run_fetched: dict[str, str | None] = {}
+        self._run_fetched: dict[str, str] = {}
         self._jstats = JurisdictionFetchStats()
 
     def close(self) -> None:
@@ -133,62 +181,147 @@ class PageFetcher:
         self._jstats = JurisdictionFetchStats()
         return stats
 
+    def fetch_failures(self) -> list[FetchFailureRecord]:
+        return list(self._jstats.fetch_failures)
+
+    def _profile_settings(self, profile: str) -> _FetchProfileSettings:
+        return self._profiles.get(profile, self._profiles["default"])
+
+    def _run_cache_key(self, normalized: str, profile: str) -> str:
+        return f"{normalized}|{profile}"
+
     def _wait(self) -> None:
         elapsed = time.time() - self._last_request
         if elapsed < self.delay:
             time.sleep(self.delay - elapsed)
         self._last_request = time.time()
 
-    def fetch_html(self, url: str, base: str | None = None) -> str | None:
+    def _record_failure(
+        self,
+        *,
+        url: str,
+        http_status: int,
+        error_type: str,
+        redirect_chain: str,
+        content_type: str,
+        rejection_reason: str,
+        attempts: int,
+    ) -> None:
+        self._jstats.fetch_failures.append(
+            FetchFailureRecord(
+                url=url,
+                http_status=http_status,
+                error_type=error_type,
+                redirect_chain=redirect_chain,
+                content_type=content_type,
+                rejection_reason=rejection_reason,
+                attempts=attempts,
+            )
+        )
+
+    def fetch_html(
+        self,
+        url: str,
+        base: str | None = None,
+        *,
+        profile: str = "default",
+    ) -> str | None:
         normalized = normalize_url(url, base)
         if not normalized:
             return None
         if not allowed_by_robots(normalized):
+            self._record_failure(
+                url=normalized,
+                http_status=0,
+                error_type="robots_denied",
+                redirect_chain="",
+                content_type="",
+                rejection_reason="robots_txt_disallow",
+                attempts=0,
+            )
             return None
 
-        if normalized in self._run_fetched:
+        cache_key = self._run_cache_key(normalized, profile)
+        if cache_key in self._run_fetched:
             self._jstats.cache_hits += 1
-            return self._run_fetched[normalized]
+            return self._run_fetched[cache_key]
 
         if self.use_fetch_cache and not self.force_refresh:
             cached = get_cached_fetch(normalized, self.fetch_cache_ttl_days)
             if cached and cached.html:
                 self._jstats.cache_hits += 1
-                self._run_fetched[normalized] = cached.html
+                self._run_fetched[cache_key] = cached.html
                 return cached.html
 
         legacy_path = HTML_CACHE / f"{_cache_key(normalized)}.html"
         if legacy_path.exists() and not self.force_refresh:
             text = legacy_path.read_text(encoding="utf-8", errors="replace")
             self._jstats.cache_hits += 1
-            self._run_fetched[normalized] = text
+            self._run_fetched[cache_key] = text
             return text
 
+        settings = self._profile_settings(profile)
+        timeout = httpx.Timeout(
+            connect=settings.connect_timeout,
+            read=settings.read_timeout,
+            write=settings.read_timeout,
+            pool=settings.connect_timeout,
+        )
+
         self._jstats.cache_misses += 1
-        self._wait()
         text: str | None = None
         final_url = normalized
         status_code = 0
         content_type = ""
-        for attempt in range(self.max_retries + 1):
+        redirect_chain = ""
+        last_rejection = ""
+        last_error_type = ""
+        attempts = 0
+
+        for attempt in range(settings.max_retries + 1):
+            attempts = attempt + 1
+            if attempt > 0:
+                backoff = settings.retry_backoff_seconds * attempt
+                time.sleep(min(backoff, 8.0))
+            self._wait()
             try:
-                resp = self.client.get(normalized)
+                resp = self.client.get(normalized, timeout=timeout)
                 status_code = resp.status_code
-                final_url = normalize_url(str(resp.url)) or normalized
+                try:
+                    final_url = normalize_url(str(resp.url)) or normalized
+                except RuntimeError:
+                    final_url = normalized
                 content_type = resp.headers.get("content-type", "")
-                text = _response_html(resp)
+                try:
+                    redirect_chain = _redirect_chain(resp)
+                except RuntimeError:
+                    redirect_chain = normalized
+                text, last_rejection = _response_html(resp)
+                if text:
+                    break
+                if status_code in RETRYABLE_HTTP_STATUS and attempt < settings.max_retries:
+                    last_error_type = "rate_limit" if status_code == 429 else "transient_http"
+                    retry_after = resp.headers.get("retry-after", "")
+                    if retry_after.isdigit():
+                        time.sleep(min(float(retry_after), 10.0))
+                    continue
+                last_error_type = "http_error"
                 break
             except httpx.TimeoutException:
                 self._jstats.timeout_count += 1
-                if attempt >= self.max_retries:
+                last_error_type = "timeout"
+                last_rejection = "timeout"
+                if attempt >= settings.max_retries:
                     break
-            except httpx.HTTPError:
+            except httpx.HTTPError as exc:
                 self._jstats.fetch_error_count += 1
-                if attempt >= self.max_retries:
+                last_error_type = "connection_error"
+                last_rejection = exc.__class__.__name__
+                if attempt >= settings.max_retries:
                     break
 
-        self._run_fetched[normalized] = text
         if text:
+            self._run_fetched[cache_key] = text
             HTML_CACHE.mkdir(parents=True, exist_ok=True)
             legacy_path.write_text(text, encoding="utf-8")
             if self.use_fetch_cache:
@@ -199,7 +332,18 @@ class PageFetcher:
                     content_type=content_type,
                     html=text,
                 )
-        return text
+            return text
+
+        self._record_failure(
+            url=normalized,
+            http_status=status_code,
+            error_type=last_error_type or "fetch_failed",
+            redirect_chain=redirect_chain,
+            content_type=content_type,
+            rejection_reason=last_rejection or "unknown",
+            attempts=attempts,
+        )
+        return None
 
     def fetch_pdf(self, url: str, max_bytes: int = 5_000_000) -> bytes | None:
         normalized = normalize_url(url)
@@ -230,10 +374,29 @@ class PageFetcher:
         found: list[str] = []
         for path in DOMAIN_PROBE_PATHS:
             url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
-            html = self.fetch_html(url)
+            html = self.fetch_html(url, profile="planning")
             if html and len(html) > 500:
                 found.append(url)
         return found
+
+
+def format_fetch_failures(failures: list[FetchFailureRecord], *, limit: int = 8) -> str:
+    """Compact diagnostics string for CSV/JSON."""
+    parts: list[str] = []
+    for rec in failures[:limit]:
+        parts.append(
+            f"{rec.url}|status={rec.http_status}|err={rec.error_type}|reason={rec.rejection_reason}"
+        )
+    if len(failures) > limit:
+        parts.append(f"...+{len(failures) - limit} more")
+    return "; ".join(parts)
+
+
+def fetch_profile_for_page_kind(page_kind: str) -> str:
+    """Return fetch profile name for a crawl page kind."""
+    if page_kind in ("manual", "planning", "directory"):
+        return "planning"
+    return "default"
 
 
 def safe_soup(html: str) -> BeautifulSoup | None:

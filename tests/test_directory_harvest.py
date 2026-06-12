@@ -51,7 +51,7 @@ def test_harvest_finds_contact_on_official_directory(monkeypatch):
     """
 
     class StubFetcher:
-        def fetch_html(self, url: str) -> str | None:
+        def fetch_html(self, url: str, **kwargs) -> str | None:
             if "southburlingtonvt.gov" in url:
                 return html
             return None
@@ -79,7 +79,7 @@ def test_harvest_manual_official_site():
     j = Jurisdiction(state="DE", jurisdiction_name="Dover", geography_type="city", population=39491)
 
     class StubFetcher:
-        def fetch_html(self, url: str) -> str | None:
+        def fetch_html(self, url: str, **kwargs) -> str | None:
             if "manual.example.gov" in url:
                 return "<html>Planning Director Jane Doe jane.doe@manual.example.gov</html>"
             return None
@@ -98,3 +98,47 @@ def test_harvest_manual_official_site():
     working, rejected, diag_row = harvest_jurisdiction(j, StubFetcher(), overrides)
     assert working is not None
     assert "manual.example.gov" in working["email"]
+
+
+def test_planning_fallback_prefetched_and_extracted(monkeypatch):
+    j = Jurisdiction(state="CA", jurisdiction_name="Merced", geography_type="city", population=89766)
+    planning_url = "https://www.cityofmerced.gov/business-and-development/planning"
+    staff_html = """
+    <html><body>
+    <h2>Planning Director</h2>
+    <p>Jane Planner</p>
+    <a href="mailto:jane.planner@cityofmerced.gov">Email</a>
+    </body></html>
+    """
+    fetched: list[tuple[str, str]] = []
+
+    class StubFetcher:
+        def fetch_html(self, url: str, **kwargs) -> str | None:
+            profile = kwargs.get("profile", "default")
+            fetched.append((url, profile))
+            if url == planning_url and profile == "planning":
+                return staff_html
+            if "cityofmerced.gov" in url:
+                return "<html><body><a href='/planning'>Planning</a></body></html>"
+            return None
+
+        def begin_jurisdiction(self) -> None:
+            pass
+
+        def end_jurisdiction(self):
+            from src.fetch_pages import JurisdictionFetchStats
+
+            return JurisdictionFetchStats()
+
+    monkeypatch.setattr(
+        "src.directory_harvest._resolve_official_site",
+        lambda *a, **k: ("https://www.cityofmerced.gov", [planning_url]),
+    )
+
+    working, rejected, diag_row = harvest_jurisdiction(j, StubFetcher())
+    assert diag_row["planning_fallback_attempted"] == "yes"
+    assert diag_row["planning_fallback_success"] == "yes"
+    assert int(diag_row["pages_fetched"]) >= 1
+    assert any(url == planning_url and profile == "planning" for url, profile in fetched)
+    assert working is not None
+    assert working["email"] == "jane.planner@cityofmerced.gov"
