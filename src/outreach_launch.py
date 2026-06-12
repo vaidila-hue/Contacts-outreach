@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 import urllib.error
@@ -74,3 +75,28 @@ def reset_browser_state_for_tests() -> None:
     global _browser_opened
     with _browser_lock:
         _browser_opened = False
+
+
+def warn_if_send_worker_inactive(port: int = OUTREACH_PORT) -> None:
+    """Print a warning when CRM is up but the send-queue worker thread is not alive."""
+    try:
+        req = urllib.request.Request(
+            f"http://{CRM_PUBLIC_HOST}:{port}/send-queue/status",
+            headers={"User-Agent": "Contacts-CRM-Launcher/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        return
+    if payload.get("worker_thread_alive"):
+        block = payload.get("block_reason") or ""
+        if block:
+            print(f"Send queue note: {block} ({payload.get('queued_count', 0)} queued).")
+        return
+    print(
+        "Warning: CRM is running but the send queue worker is not active.\n"
+        "Stop the CRM process and restart it to resume throttled sending."
+    )
+    block = payload.get("block_reason") or ""
+    if block:
+        print(f"Send queue note: {block} ({payload.get('queued_count', 0)} queued).")

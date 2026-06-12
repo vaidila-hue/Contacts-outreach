@@ -17,7 +17,7 @@ from src.send_queue import (
     resume_queue,
     send_next_queued,
 )
-from src.send_queue_worker import start_send_queue_worker
+from src.send_queue_worker import get_worker_status, start_send_queue_worker
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
     delete_outreach_row,
@@ -203,6 +203,8 @@ PAGE_TEMPLATE = """
     <div class="metric metric-compact"><span>Queued</span><strong>{{ queue_dashboard.queued }}</strong></div>
     <div class="metric metric-compact"><span>Sent today</span><strong>{{ queue_dashboard.sent_today }}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Next send</span><strong>{{ queue_dashboard.next_send }}</strong></div>
+    <div class="metric metric-compact"><span>Worker</span><strong>{% if queue_dashboard.worker_alive == 'yes' %}running{% else %}stopped{% endif %}</strong></div>
+    <div class="metric metric-compact metric-wide"><span>Last tick</span><strong title="{{ queue_dashboard.worker_last_result }}">{{ queue_dashboard.worker_last_tick }}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Last harvest</span><strong id="harvest-last-run"{% if harvest_running %} class="harvest-running"{% endif %}>{% if harvest_running %}Finding contacts...{% elif harvest_dashboard %}{{ harvest_dashboard.last_run }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>Processed</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.jurisdictions_processed }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>New contacts</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.new_contacts }}{% else %}—{% endif %}</strong></div>
@@ -551,7 +553,34 @@ def create_app(*, start_worker: bool = False) -> Flask:
     app = Flask(__name__)
 
     if start_worker:
-        start_send_queue_worker(testing=False)
+        started = start_send_queue_worker(testing=False)
+        if not started:
+            worker = get_worker_status()
+            if not worker.thread_alive:
+                print("Warning: send queue worker is not running. Restart the CRM to resume queued sends.")
+
+    @app.get("/send-queue/status")
+    def send_queue_status():
+        from flask import jsonify
+        from src.send_queue import SendQueueState, queue_block_reason, queued_rows
+
+        rows = read_outreach_rows()
+        state = SendQueueState.load()
+        worker = get_worker_status()
+        return jsonify(
+            {
+                "worker_started": worker.started,
+                "worker_thread_alive": worker.thread_alive,
+                "worker_started_at": worker.started_at,
+                "worker_last_tick_at": worker.last_tick_at,
+                "worker_last_tick_ok": worker.last_tick_ok,
+                "worker_last_tick_detail": worker.last_tick_detail,
+                "queued_count": len(queued_rows(rows)),
+                "next_send_at": state.next_send_at,
+                "paused": state.paused,
+                "block_reason": queue_block_reason(rows, state),
+            }
+        )
 
     @app.get("/")
     def index():

@@ -65,6 +65,7 @@ from src.outreach_launch import (
     is_crm_server_running,
     is_port_in_use,
     open_crm_browser,
+    warn_if_send_worker_inactive,
 )
 from src.outreach_ui import run_outreach_server
 from src.paths import (
@@ -901,6 +902,7 @@ def run_outreach_open() -> int:
         open_crm_browser()
         print(f"Contacts CRM is already running at {CRM_URL}")
         print("Opened browser.")
+        warn_if_send_worker_inactive()
         return 0
     if is_port_in_use():
         print(

@@ -21,6 +21,7 @@ from src.send_queue import (
     SendQueueState,
     cancel_queue,
     compute_next_send_at,
+    compute_queue_dashboard,
     pause_queue,
     process_send_queue,
     queue_ready_contacts,
@@ -271,6 +272,55 @@ def test_gmail_error_pauses_queue(queue_paths):
     state = SendQueueState.load()
     assert state.paused
     assert read_outreach_rows()[0]["send_status"] == "failed"
+
+
+def test_daily_limit_shown_as_next_send_blocker(queue_paths):
+    now = datetime.now(timezone.utc)
+    rows = []
+    for i in range(MAX_EMAILS_PER_DAY):
+        row = {col: "" for col in OUTREACH_COLUMNS}
+        row.update(
+            {
+                "email": f"sent{i}@test.gov",
+                "state": "FL",
+                "jurisdiction_name": f"SentCity{i}",
+                "send_status": "sent",
+                "sent_at": now.isoformat(),
+            }
+        )
+        rows.append(row)
+    row = {col: "" for col in OUTREACH_COLUMNS}
+    row.update(
+        {
+            "email": "queued@test.gov",
+            "state": "FL",
+            "jurisdiction_name": "QueuedCity",
+            "send_status": "queued",
+            "approved": "yes",
+            "subject": "Hi",
+            "body": "Body",
+            "greeting_name": "Test",
+        }
+    )
+    rows.append(row)
+    write_outreach_rows(rows)
+    state = SendQueueState.load()
+    state.next_send_at = (now - timedelta(hours=1)).isoformat()
+    state.save()
+    dashboard = compute_queue_dashboard(rows)
+    assert dashboard["next_send"] == "Daily limit reached"
+    assert "daily" in dashboard["block_reason"]
+    service = MockGmailService()
+    ok, msg = send_next_queued(service=service)
+    assert not ok
+    assert "daily" in msg
+
+
+def test_queue_block_reason_when_not_limited(queue_paths):
+    _prepare_ready_row(queue_paths)
+    queue_ready_contacts()
+    dashboard = compute_queue_dashboard()
+    assert dashboard["block_reason"] == ""
 
 
 def test_queue_resumes_after_restart(queue_paths):

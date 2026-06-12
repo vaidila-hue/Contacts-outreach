@@ -301,8 +301,18 @@ def process_send_queue(
     return send_next_queued(service=service, force_now=False, now=now, rng=rng)
 
 
-def format_next_send_display(state: SendQueueState | None = None) -> str:
+def format_next_send_display(
+    state: SendQueueState | None = None,
+    rows: list[dict[str, str]] | None = None,
+) -> str:
     state = state or SendQueueState.load()
+    rows = rows if rows is not None else read_outreach_rows()
+    block = queue_block_reason(rows, state)
+    if block and queued_rows(rows):
+        if "daily" in block:
+            return "Daily limit reached"
+        if "hourly" in block:
+            return "Hourly limit reached"
     if state.paused:
         return "Paused"
     if not state.next_send_at:
@@ -310,13 +320,40 @@ def format_next_send_display(state: SendQueueState | None = None) -> str:
     return _fmt_ts_et(state.next_send_at)
 
 
+def queue_block_reason(
+    rows: list[dict[str, str]] | None = None,
+    state: SendQueueState | None = None,
+    *,
+    now: datetime | None = None,
+) -> str:
+    rows = rows if rows is not None else read_outreach_rows()
+    state = state or SendQueueState.load()
+    if not queued_rows(rows):
+        return ""
+    if state.paused:
+        return state.pause_reason or "paused"
+    limited, reason = rate_limits_exceeded(rows, now=now)
+    if limited:
+        return reason
+    return ""
+
+
 def compute_queue_dashboard(rows: list[dict[str, str]] | None = None) -> dict[str, str]:
     rows = rows if rows is not None else read_outreach_rows()
     state = SendQueueState.load()
     day_ago = _now_utc() - timedelta(hours=24)
+    block = queue_block_reason(rows, state)
+    from src.send_queue_worker import get_worker_status
+
+    worker = get_worker_status()
     return {
         "queued": str(len(queued_rows(rows))),
         "sent_today": str(sent_since(rows, day_ago)),
-        "next_send": format_next_send_display(state),
+        "next_send": format_next_send_display(state, rows),
         "paused": "yes" if state.paused else "no",
+        "block_reason": block,
+        "worker_running": "yes" if worker.started else "no",
+        "worker_alive": "yes" if worker.thread_alive else "no",
+        "worker_last_tick": worker.last_tick_display(),
+        "worker_last_result": worker.last_tick_detail or "—",
     }
