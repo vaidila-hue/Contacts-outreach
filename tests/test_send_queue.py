@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -21,6 +22,7 @@ from src.send_queue import (
     cancel_queue,
     compute_next_send_at,
     pause_queue,
+    process_send_queue,
     queue_ready_contacts,
     queued_rows,
     rate_limits_exceeded,
@@ -88,6 +90,26 @@ def _prepare_ready_row(queue_paths, email: str = "a@test.gov", jurisdiction: str
     rows = read_outreach_rows()
     rows[0]["approved"] = "yes"
     write_outreach_rows(rows)
+
+
+def _prepare_four_ready_rows(queue_paths):
+    working, _, _ = queue_paths
+    rows = [
+        _working_row(
+            email=f"user{i}@test.gov",
+            jurisdiction_name=f"City{i}",
+            contact_name=f"Planner {i}",
+            email_source_url=f"https://city{i}.gov/planning",
+            candidate_source_url=f"https://city{i}.gov/planning",
+        )
+        for i in range(4)
+    ]
+    write_csv(working, rows, WORKING_COLUMNS)
+    prepare_outreach()
+    outreach = read_outreach_rows()
+    for row in outreach:
+        row["approved"] = "yes"
+    write_outreach_rows(outreach)
 
 
 def test_queue_ready_does_not_send_immediately(queue_paths):
@@ -262,3 +284,119 @@ def test_queue_resumes_after_restart(queue_paths):
     service = MockGmailService()
     ok, _ = send_next_queued(service=service, force_now=False)
     assert ok
+
+
+def test_queue_four_rows_does_not_send_immediately(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    service = MockGmailService()
+    count, _ = queue_ready_contacts()
+    assert count == 4
+    assert len(service.sent) == 0
+    assert len(queued_rows()) == 4
+
+
+def test_queue_schedules_first_send_soon_not_one_interval_later(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    before = datetime.now(timezone.utc)
+    queue_ready_contacts()
+    state = SendQueueState.load()
+    due = datetime.fromisoformat(state.next_send_at)
+    assert due <= before + timedelta(seconds=5)
+    assert due >= before - timedelta(seconds=5)
+
+
+def test_worker_tick_sends_at_most_one(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    service = MockGmailService()
+    ok, _ = process_send_queue(service=service)
+    assert ok
+    assert len(service.sent) == 1
+    assert len(queued_rows()) == 3
+
+
+def test_second_tick_before_next_send_at_sends_zero(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    service = MockGmailService()
+    fixed = datetime(2026, 6, 11, 21, 52, 0, tzinfo=timezone.utc)
+    state = SendQueueState.load()
+    state.next_send_at = fixed.isoformat()
+    state.save()
+    ok, _ = process_send_queue(service=service, now=fixed)
+    assert ok
+    assert len(service.sent) == 1
+    ok, msg = process_send_queue(service=service, now=fixed + timedelta(seconds=30))
+    assert not ok
+    assert "not due" in msg
+    assert len(service.sent) == 1
+
+
+def test_next_due_tick_sends_exactly_one(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    service = MockGmailService()
+    fixed = datetime(2026, 6, 11, 21, 52, 0, tzinfo=timezone.utc)
+    state = SendQueueState.load()
+    state.next_send_at = fixed.isoformat()
+    state.save()
+    rng = __import__("random").Random(0)
+    assert send_next_queued(service=service, now=fixed, rng=rng)[0]
+    assert len(service.sent) == 1
+    state = SendQueueState.load()
+    due = datetime.fromisoformat(state.next_send_at)
+    assert due > fixed
+    assert send_next_queued(service=service, now=due, rng=rng)[0]
+    assert len(service.sent) == 2
+
+
+def test_queued_rows_share_one_global_next_send_at(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    state = SendQueueState.load()
+    first_due = state.next_send_at
+    assert first_due
+    rows = read_outreach_rows()
+    for row in rows:
+        if row["send_status"] == "queued":
+            assert row.get("next_send_at", "") == ""
+    assert SendQueueState.load().next_send_at == first_due
+
+
+def test_overdue_restart_sends_one_not_burst(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    state = SendQueueState.load()
+    overdue = datetime(2026, 6, 11, 20, 0, 0, tzinfo=timezone.utc)
+    state.next_send_at = overdue.isoformat()
+    state.save()
+    service = MockGmailService()
+    restart_now = datetime(2026, 6, 11, 21, 52, 0, tzinfo=timezone.utc)
+    ok, _ = send_next_queued(service=service, now=restart_now)
+    assert ok
+    assert len(service.sent) == 1
+    assert len(queued_rows()) == 3
+    after = SendQueueState.load()
+    assert datetime.fromisoformat(after.next_send_at) > restart_now
+
+
+def test_concurrent_ticks_send_at_most_one(queue_paths):
+    _prepare_four_ready_rows(queue_paths)
+    queue_ready_contacts()
+    service = MockGmailService()
+    fixed = datetime(2026, 6, 11, 21, 52, 0, tzinfo=timezone.utc)
+    state = SendQueueState.load()
+    state.next_send_at = fixed.isoformat()
+    state.save()
+    results: list[tuple[bool, str]] = []
+
+    def _tick():
+        results.append(send_next_queued(service=service, now=fixed))
+
+    threads = [threading.Thread(target=_tick) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(service.sent) == 1
+    assert sum(1 for ok, _ in results if ok) == 1

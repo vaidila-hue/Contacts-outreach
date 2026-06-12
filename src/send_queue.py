@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import threading
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,8 @@ BASE_INTERVAL_SECONDS = 300
 JITTER_SECONDS = 90
 MAX_EMAILS_PER_DAY = 25
 MAX_EMAILS_PER_HOUR = 10
+
+_send_lock = threading.Lock()
 
 
 @dataclass
@@ -90,6 +93,18 @@ def _parse_iso(value: str) -> datetime | None:
         return None
 
 
+def _schedule_first_send_at(*, now: datetime | None = None) -> str:
+    """Mark the queue eligible for one send on the next worker tick (not in-process)."""
+    return (now or _now_utc()).replace(microsecond=0).isoformat()
+
+
+def _ensure_queue_send_scheduled(state: SendQueueState, *, prior_queued_count: int) -> None:
+    """Ensure queued rows have a valid due time without delaying the first send by one interval."""
+    due = _parse_iso(state.next_send_at)
+    if prior_queued_count == 0 or not state.next_send_at or due is None:
+        state.next_send_at = _schedule_first_send_at()
+
+
 def queued_rows(rows: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     rows = rows if rows is not None else read_outreach_rows()
     queued = [r for r in rows if (r.get("send_status") or "") == QUEUED_STATUS]
@@ -130,6 +145,7 @@ def queue_ready_contacts() -> tuple[int, str]:
     state = SendQueueState.load()
     batch_id = str(uuid.uuid4())
     now = _now_iso()
+    prior_queued_count = len(queued_rows(rows))
     keys = {outreach_key(c) for c in candidates}
     queued = 0
     for row in rows:
@@ -144,8 +160,7 @@ def queue_ready_contacts() -> tuple[int, str]:
 
     write_outreach_rows(rows)
     state.queue_batch_id = batch_id
-    if not state.next_send_at:
-        state.next_send_at = compute_next_send_at()
+    _ensure_queue_send_scheduled(state, prior_queued_count=prior_queued_count)
     state.paused = False
     state.pause_reason = ""
     state.consecutive_errors = 0
@@ -226,53 +241,64 @@ def send_next_queued(
     rng: random.Random | None = None,
 ) -> tuple[bool, str]:
     """Send at most one queued email if due and limits allow."""
-    now = now or _now_utc()
-    state = SendQueueState.load()
-    rows = read_outreach_rows()
-    pending = queued_rows(rows)
-
-    if state.paused:
-        return False, "Queue paused"
-    if not pending:
-        return False, "Queue empty"
-    limited, reason = rate_limits_exceeded(rows, now=now)
-    if limited:
-        return False, reason
-
-    if not force_now:
-        due = _parse_iso(state.next_send_at)
-        if due and due > now:
-            return False, "not due yet"
-
-    row = pending[0]
-    if row.get("send_status") == SENT_STATUS:
-        return False, "already sent"
-
-    if service is None:
-        service = build_gmail_service()
-        verify_gmail_account(service)
-
-    try:
-        _send_row(service, row)
+    with _send_lock:
+        now = now or _now_utc()
         state = SendQueueState.load()
-        state.consecutive_errors = 0
-        state.next_send_at = compute_next_send_at(now=now, rng=rng)
-        if not queued_rows():
-            state.next_send_at = ""
-        state.save()
-        return True, f"Sent to {row.get('email')}"
-    except Exception as exc:
-        apply_failure(row, str(exc))
-        state = SendQueueState.load()
-        state.consecutive_errors += 1
-        state.paused = True
-        state.pause_reason = str(exc)[:200]
-        state.save()
-        return False, str(exc)
+        rows = read_outreach_rows()
+        pending = queued_rows(rows)
+
+        if state.paused:
+            return False, "Queue paused"
+        if not pending:
+            return False, "Queue empty"
+        limited, reason = rate_limits_exceeded(rows, now=now)
+        if limited:
+            return False, reason
+
+        if not force_now:
+            due = _parse_iso(state.next_send_at)
+            if due is None:
+                return False, "not due yet"
+            if due > now:
+                return False, "not due yet"
+
+        row = pending[0]
+        if row.get("send_status") == SENT_STATUS:
+            return False, "already sent"
+
+        if service is None:
+            service = build_gmail_service()
+            verify_gmail_account(service)
+
+        try:
+            _send_row(service, row)
+            state = SendQueueState.load()
+            state.consecutive_errors = 0
+            completed_at = _now_utc()
+            remaining = queued_rows()
+            if remaining:
+                state.next_send_at = compute_next_send_at(now=completed_at, rng=rng)
+            else:
+                state.next_send_at = ""
+            state.save()
+            return True, f"Sent to {row.get('email')}"
+        except Exception as exc:
+            apply_failure(row, str(exc))
+            state = SendQueueState.load()
+            state.consecutive_errors += 1
+            state.paused = True
+            state.pause_reason = str(exc)[:200]
+            state.save()
+            return False, str(exc)
 
 
-def process_send_queue(service: GmailService | None = None) -> tuple[bool, str]:
-    return send_next_queued(service=service, force_now=False)
+def process_send_queue(
+    service: GmailService | None = None,
+    *,
+    now: datetime | None = None,
+    rng: random.Random | None = None,
+) -> tuple[bool, str]:
+    return send_next_queued(service=service, force_now=False, now=now, rng=rng)
 
 
 def format_next_send_display(state: SendQueueState | None = None) -> str:
