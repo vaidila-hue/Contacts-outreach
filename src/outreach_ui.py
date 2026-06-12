@@ -47,6 +47,12 @@ PAGE_TEMPLATE = """
     body { font-family: Arial, sans-serif; margin: 16px; }
     h1 { margin-bottom: 8px; }
     .dashboard { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 12px; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
+    .harvest-panel { margin: 0 0 12px; padding: 10px 12px; background: #f9fafb; border: 1px solid #ccd; font-size: 13px; }
+    .harvest-panel h2 { margin: 0 0 8px; font-size: 15px; }
+    .harvest-grid { display: flex; flex-wrap: wrap; gap: 14px 24px; }
+    .harvest-grid div strong { display: block; font-size: 16px; }
+    .harvest-meta { color: #444; margin-top: 6px; font-size: 12px; }
+    .harvest-warn { color: #854; }
     .metric { min-width: 100px; }
     .metric strong { display: block; font-size: 20px; }
     .filters { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -165,6 +171,29 @@ PAGE_TEMPLATE = """
     <div class="metric"><span>Sent</span><strong>{{ stats.sent }}</strong></div>
     <div class="metric"><span>Replies</span><strong>{{ stats.replies }}</strong></div>
   </div>
+
+  {% if harvest_dashboard %}
+  <div class="harvest-panel">
+    <h2>Last harvest</h2>
+    <div class="harvest-grid">
+      <div><span>Completed</span><strong>{{ harvest_dashboard.last_run }}</strong></div>
+      <div><span>Processed</span><strong>{{ harvest_dashboard.jurisdictions_processed }}</strong></div>
+      <div><span>Skipped (in CRM)</span><strong>{{ harvest_dashboard.skipped_existing }}</strong></div>
+      <div><span>New contacts</span><strong>{{ harvest_dashboard.new_contacts }}</strong></div>
+      <div><span>Duplicates after crawl</span><strong>{{ harvest_dashboard.duplicates_skipped }}</strong></div>
+      <div><span>No-contact jurisdictions</span><strong>{{ harvest_dashboard.no_contact_jurisdictions }}</strong></div>
+    </div>
+    <div class="harvest-meta">
+      Discovery: {{ harvest_dashboard.discovery_impl }}
+      {% if harvest_summary and harvest_summary.recommendation_code %}
+      · Recommendation {{ harvest_summary.recommendation_code }}
+      {% endif %}
+      {% if harvest_dashboard.discovery_impl.startswith('legacy') %}
+      <span class="harvest-warn"> — re-run harvest to use improved site discovery.</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <div class="filters">
     {% for key, label in filter_options %}
@@ -510,12 +539,19 @@ def create_app() -> Flask:
         stats = compute_dashboard(all_rows)
         rows = _display_rows(all_rows, filter_name)
         message = request.args.get("msg", "")
-        if request.args.get("harvest") == "1":
-            from src.harvest_summary import load_harvest_summary
+        harvest_summary = None
+        harvest_dashboard = None
+        from src.harvest_summary import load_harvest_summary
+        from src.harvest_report import build_report_from_summary_file, format_harvest_dashboard
 
-            summary = load_harvest_summary()
-            if summary:
-                message = summary.format_message()
+        harvest_summary = load_harvest_summary()
+        if harvest_summary:
+            if not harvest_summary.discovery_implementation:
+                build_report_from_summary_file()
+                harvest_summary = load_harvest_summary()
+            harvest_dashboard = format_harvest_dashboard(harvest_summary)
+        if request.args.get("harvest") == "1" and harvest_summary:
+            message = harvest_summary.format_message()
         harvest_config = load_harvest_config()
         default_message = load_default_message()
         return render_template_string(
@@ -526,6 +562,8 @@ def create_app() -> Flask:
             current_filter=filter_name,
             reply_status_values=REPLY_STATUS_VALUES,
             harvest_config=harvest_config,
+            harvest_summary=harvest_summary,
+            harvest_dashboard=harvest_dashboard,
             default_message=default_message,
             us_states=US_STATE_CODES,
             message=message,

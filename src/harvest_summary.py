@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 from src.census_seed import Jurisdiction, STATE_FIPS
+from src.jurisdiction_utils import jurisdiction_match_key
 from src.paths import LAST_HARVEST_SUMMARY_JSON
 
 
@@ -21,6 +22,7 @@ class PrepareStats:
     duplicate_email_jurisdiction: int = 0
     merged_updates: int = 0
     new_added: int = 0
+    duplicate_after_crawl: int = 0
 
     @property
     def duplicates_skipped_total(self) -> int:
@@ -43,12 +45,15 @@ class HarvestRunSummary:
     include_counties: bool = False
     deep_mode: bool = False
     unsupported_states: list[str] = field(default_factory=list)
+    jurisdictions_seeded_count: int = 0
     jurisdictions_considered_count: int = 0
     jurisdictions_skipped_existing_count: int = 0
+    jurisdictions_available_after_skip_count: int = 0
     jurisdictions_processed_count: int = 0
     candidates_found_count: int = 0
     candidates_added_count: int = 0
     duplicates_skipped_count: int = 0
+    duplicate_after_crawl_count: int = 0
     duplicate_email: int = 0
     duplicate_contact_jurisdiction: int = 0
     duplicate_source_name: int = 0
@@ -59,6 +64,18 @@ class HarvestRunSummary:
     processed_jurisdictions: list[dict[str, str]] = field(default_factory=list)
     skipped_existing_jurisdictions: list[dict[str, str]] = field(default_factory=list)
     top_rejection_reasons: list[dict[str, str | int]] = field(default_factory=list)
+    discovery_implementation: str = ""
+    max_search_queries_config: int = 0
+    resolver_method_counts: dict[str, int] = field(default_factory=dict)
+    official_sites_resolved_count: int = 0
+    planning_fallback_used_count: int = 0
+    avg_search_queries: float = 0.0
+    no_official_site_count: int = 0
+    no_planning_contact_count: int = 0
+    only_generic_email_count: int = 0
+    top_failures: list[dict[str, str]] = field(default_factory=list)
+    recommendation_code: str = ""
+    recommendation: str = ""
 
     def config_line(self) -> str:
         states = ",".join(self.config_states)
@@ -78,16 +95,17 @@ class HarvestRunSummary:
             )
         lines.extend(
             [
-                f"• Jurisdictions considered: {self.jurisdictions_considered_count}",
-                f"• Already represented and skipped: {self.jurisdictions_skipped_existing_count}",
+                f"• Jurisdictions seeded: {self.jurisdictions_seeded_count or self.jurisdictions_considered_count}",
+                f"• Skipped existing jurisdictions (no crawl): {self.jurisdictions_skipped_existing_count}",
+                f"• Available after skip: {self.jurisdictions_available_after_skip_count}",
                 f"• Jurisdictions processed: {self.jurisdictions_processed_count}",
                 f"• Candidates found before filtering: {self.candidates_found_count}",
                 f"• Added new contacts: {self.candidates_added_count}",
             ]
         )
-        dup_total = self.duplicates_skipped_count
+        dup_total = self.duplicate_after_crawl_count or self.duplicates_skipped_count
         if dup_total:
-            lines.append(f"• Duplicate contacts skipped: {dup_total}")
+            lines.append(f"• Duplicate contacts after crawl: {dup_total}")
             if self.duplicate_email:
                 lines.append(f"  – duplicate email: {self.duplicate_email}")
             if self.duplicate_contact_jurisdiction:
@@ -155,26 +173,44 @@ def jurisdiction_record(j: Jurisdiction) -> dict[str, str]:
     }
 
 
-def represented_jurisdiction_keys(rows: list[dict[str, str]]) -> set[tuple[str, str]]:
+def build_covered_jurisdiction_set(rows: list[dict[str, str]]) -> set[tuple[str, str]]:
+    """CRM jurisdictions already represented (state + name with email or contact name)."""
     keys: set[tuple[str, str]] = set()
     for row in rows:
+        state = (row.get("state") or "").strip()
         name = (row.get("jurisdiction_name") or "").strip()
-        state = (row.get("state") or "").strip().upper()
-        if name and state:
-            keys.add((state, name))
+        email = (row.get("email") or "").strip()
+        contact = (row.get("contact_name") or "").strip()
+        if not state or not name:
+            continue
+        if not email and not contact:
+            continue
+        keys.add(jurisdiction_match_key(state, name))
     return keys
+
+
+def represented_jurisdiction_keys(rows: list[dict[str, str]]) -> set[tuple[str, str]]:
+    """Alias for build_covered_jurisdiction_set."""
+    return build_covered_jurisdiction_set(rows)
+
+
+def jurisdiction_is_covered(j: Jurisdiction, covered: set[tuple[str, str]]) -> bool:
+    return jurisdiction_match_key(j.state, j.jurisdiction_name) in covered
 
 
 def partition_jurisdictions(
     jurisdictions: list[Jurisdiction],
-    represented: set[tuple[str, str]],
+    covered: set[tuple[str, str]],
 ) -> tuple[list[Jurisdiction], list[Jurisdiction]]:
     pending: list[Jurisdiction] = []
     skipped: list[Jurisdiction] = []
+    seen_skip_keys: set[tuple[str, str]] = set()
     for j in jurisdictions:
-        key = (j.state.upper(), j.jurisdiction_name.strip())
-        if key in represented:
-            skipped.append(j)
+        key = jurisdiction_match_key(j.state, j.jurisdiction_name)
+        if key in covered:
+            if key not in seen_skip_keys:
+                skipped.append(j)
+                seen_skip_keys.add(key)
         else:
             pending.append(j)
     return pending, skipped

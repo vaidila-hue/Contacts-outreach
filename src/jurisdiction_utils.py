@@ -47,6 +47,19 @@ def normalize_jurisdiction_name(name: str) -> str:
     return name.strip()
 
 
+def normalize_jurisdiction_key_name(name: str) -> str:
+    """Normalize jurisdiction name for CRM/harvest matching keys."""
+    base = normalize_jurisdiction_name(name).lower().strip()
+    base = re.sub(r"\bst\.?\s+", "saint ", base)
+    base = re.sub(r"[^\w\s-]", "", base)
+    return re.sub(r"\s+", " ", base).strip()
+
+
+def jurisdiction_match_key(state: str, jurisdiction_name: str) -> tuple[str, str]:
+    """Stable (state, name) key for covered-jurisdiction matching."""
+    return (state.strip().upper(), normalize_jurisdiction_key_name(jurisdiction_name))
+
+
 def jurisdiction_slug(name: str) -> str:
     base = normalize_jurisdiction_name(name)
     base = re.sub(r"\s+county$", "", base, flags=re.I)

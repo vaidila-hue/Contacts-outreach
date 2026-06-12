@@ -17,6 +17,7 @@ from src.outreach_crm import (
     save_crm_rows,
 )
 from src.harvest_summary import PrepareStats
+from src.jurisdiction_utils import jurisdiction_match_key
 from src.outreach_template import (
     DefaultMessage,
     apply_default_templates_to_row,
@@ -158,7 +159,11 @@ def _build_row_from_sources(
     return row
 
 
-def prepare_outreach(*, append_only: bool = False) -> tuple[int, int, PrepareStats]:
+def prepare_outreach(
+    *,
+    append_only: bool = False,
+    processed_jurisdiction_keys: set[tuple[str, str]] | None = None,
+) -> tuple[int, int, PrepareStats]:
     """Merge working + diagnostics into outreach.csv. Returns (total_rows, new_rows, stats)."""
     existing_rows = read_outreach_rows()
     result: list[dict[str, str]] = [dict(r) for r in existing_rows]
@@ -215,14 +220,20 @@ def prepare_outreach(*, append_only: bool = False) -> tuple[int, int, PrepareSta
         if matched_idx is not None:
             result[matched_idx] = merge_outreach_row(result[matched_idx], fresh)
             stats.merged_updates += 1
-            if dup_kind == "duplicate_email":
-                stats.duplicate_email += 1
-            elif dup_kind == "duplicate_contact_jurisdiction":
-                stats.duplicate_contact_jurisdiction += 1
-            elif dup_kind == "duplicate_source_name":
-                stats.duplicate_source_name += 1
-            elif dup_kind == "duplicate_email_jurisdiction":
-                stats.duplicate_email_jurisdiction += 1
+            cand_j_key = jurisdiction_match_key(fresh.get("state", ""), fresh.get("jurisdiction_name", ""))
+            count_dup = (
+                processed_jurisdiction_keys is None or cand_j_key in processed_jurisdiction_keys
+            )
+            if count_dup:
+                stats.duplicate_after_crawl += 1
+                if dup_kind == "duplicate_email":
+                    stats.duplicate_email += 1
+                elif dup_kind == "duplicate_contact_jurisdiction":
+                    stats.duplicate_contact_jurisdiction += 1
+                elif dup_kind == "duplicate_source_name":
+                    stats.duplicate_source_name += 1
+                elif dup_kind == "duplicate_email_jurisdiction":
+                    stats.duplicate_email_jurisdiction += 1
             continue
 
         result.append(fresh)

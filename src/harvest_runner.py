@@ -12,15 +12,17 @@ from src.domain_cache import load_domain_cache
 from src.export_results import merge_working_row, write_diagnostics_csv, write_rejected_csv, write_working_csv
 from src.fetch_pages import PageFetcher
 from src.harvest_config_store import HarvestConfigSettings, load_harvest_config
+from src.harvest_report import analyze_harvest_run, enrich_summary, save_harvest_report
 from src.harvest_summary import (
     HarvestRunSummary,
+    build_covered_jurisdiction_set,
     jurisdiction_record,
     now_iso,
     partition_jurisdictions,
-    represented_jurisdiction_keys,
     save_harvest_summary,
     unsupported_config_states,
 )
+from src.jurisdiction_utils import jurisdiction_match_key
 from src.manual_urls import load_manual_urls, manual_urls_for_jurisdiction
 from src.outreach_store import prepare_outreach, read_outreach_rows
 from src.paths import DIAGNOSTICS_COLUMNS, REJECTED_COLUMNS, REJECTED_CSV, WORKING_COLUMNS, WORKING_CSV
@@ -59,6 +61,17 @@ def _top_rejection_reasons(diagnostics_rows: list[dict[str, str]]) -> list[dict[
     return [{"reason": reason, "count": count} for reason, count in counts.most_common()]
 
 
+def _drop_covered_working_rows(
+    working_rows: list[dict[str, str]], covered: set[tuple[str, str]]
+) -> list[dict[str, str]]:
+    return [
+        row
+        for row in working_rows
+        if jurisdiction_match_key(row.get("state", ""), row.get("jurisdiction_name", ""))
+        not in covered
+    ]
+
+
 def run_find_more_contacts() -> HarvestRunSummary:
     """Harvest using saved config; skip CRM jurisdictions; append new outreach contacts only."""
     started = now_iso()
@@ -73,15 +86,18 @@ def run_find_more_contacts() -> HarvestRunSummary:
     jurisdictions = sort_jurisdictions_for_harvest(
         jurisdictions, include_counties=config.include_counties
     )
+    seeded_count = len(jurisdictions)
     save_jurisdictions(jurisdictions)
 
     outreach_rows = read_outreach_rows()
-    represented = represented_jurisdiction_keys(outreach_rows)
-    pending, skipped = partition_jurisdictions(jurisdictions, represented)
+    covered = build_covered_jurisdiction_set(outreach_rows)
+    pending, skipped = partition_jurisdictions(jurisdictions, covered)
+    available_after_skip = len(pending)
     if config.limit:
         pending = pending[: config.limit]
+    processed_keys = {jurisdiction_match_key(j.state, j.jurisdiction_name) for j in pending}
 
-    working_rows = read_csv(WORKING_CSV, WORKING_COLUMNS)
+    working_rows = _drop_covered_working_rows(read_csv(WORKING_CSV, WORKING_COLUMNS), covered)
     rejected_rows = read_csv(REJECTED_CSV, REJECTED_COLUMNS)
     manual_all = load_manual_urls()
     stats = BuildStats()
@@ -132,7 +148,10 @@ def run_find_more_contacts() -> HarvestRunSummary:
     if diagnostics_rows:
         write_diagnostics_csv(diagnostics_rows)
 
-    total, new_rows, prepare_stats = prepare_outreach(append_only=True)
+    total, new_rows, prepare_stats = prepare_outreach(
+        append_only=True,
+        processed_jurisdiction_keys=processed_keys,
+    )
 
     summary = HarvestRunSummary(
         run_started_at=started,
@@ -144,12 +163,15 @@ def run_find_more_contacts() -> HarvestRunSummary:
         include_counties=config.include_counties,
         deep_mode=config.deep_mode,
         unsupported_states=unsupported,
-        jurisdictions_considered_count=len(jurisdictions),
+        jurisdictions_seeded_count=seeded_count,
+        jurisdictions_considered_count=seeded_count,
         jurisdictions_skipped_existing_count=len(skipped),
+        jurisdictions_available_after_skip_count=available_after_skip,
         jurisdictions_processed_count=len(pending),
         candidates_found_count=candidates_found,
         candidates_added_count=new_rows,
-        duplicates_skipped_count=prepare_stats.duplicates_skipped_total,
+        duplicates_skipped_count=prepare_stats.duplicate_after_crawl,
+        duplicate_after_crawl_count=prepare_stats.duplicate_after_crawl,
         duplicate_email=prepare_stats.duplicate_email,
         duplicate_contact_jurisdiction=prepare_stats.duplicate_contact_jurisdiction,
         duplicate_source_name=prepare_stats.duplicate_source_name,
@@ -161,7 +183,10 @@ def run_find_more_contacts() -> HarvestRunSummary:
         skipped_existing_jurisdictions=[jurisdiction_record(j) for j in skipped],
         top_rejection_reasons=_top_rejection_reasons(diagnostics_rows),
     )
+    analysis = analyze_harvest_run(summary, diagnostics_rows=diagnostics_rows)
+    enrich_summary(summary, analysis)
     save_harvest_summary(summary)
+    save_harvest_report(summary, analysis, diagnostics_rows=diagnostics_rows)
     summary.print_summary()
     return summary
 

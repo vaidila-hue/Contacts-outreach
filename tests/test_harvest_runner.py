@@ -8,14 +8,16 @@ from unittest.mock import patch
 import pytest
 
 from src.census_seed import Jurisdiction
-from src.harvest_runner import run_find_more_contacts
+from src.harvest_runner import run_find_more_contacts, _drop_covered_working_rows
 from src.harvest_summary import (
     HarvestRunSummary,
+    build_covered_jurisdiction_set,
     partition_jurisdictions,
     represented_jurisdiction_keys,
     unsupported_config_states,
 )
 from src.harvest_config_store import HarvestConfigSettings
+from src.jurisdiction_utils import jurisdiction_match_key, normalize_jurisdiction_key_name
 from src.outreach_store import prepare_outreach, read_outreach_rows, write_outreach_rows
 from src.outreach_ui import create_app
 from src.paths import (
@@ -26,7 +28,7 @@ from src.paths import (
     WORKING_COLUMNS,
     WORKING_CSV,
 )
-from src.csv_utils import write_csv
+from src.csv_utils import read_csv, write_csv
 
 
 @pytest.fixture
@@ -79,22 +81,45 @@ def _j(state: str, name: str, pop: int = 50000) -> Jurisdiction:
 
 def test_represented_jurisdiction_keys_from_outreach():
     rows = [{"state": "FL", "jurisdiction_name": "Miami Beach", "email": "a@b.gov"}]
-    assert represented_jurisdiction_keys(rows) == {("FL", "Miami Beach")}
+    assert build_covered_jurisdiction_set(rows) == {("FL", "miami beach")}
+
+
+def test_empty_outreach_row_not_covered():
+    rows = [{"state": "CO", "jurisdiction_name": "Denver", "email": "", "contact_name": ""}]
+    assert build_covered_jurisdiction_set(rows) == set()
+
+
+def test_contact_name_only_counts_as_covered():
+    rows = [{"state": "CO", "jurisdiction_name": "Denver", "email": "", "contact_name": "Jane Planner"}]
+    assert build_covered_jurisdiction_set(rows) == {("CO", "denver")}
+
+
+def test_normalize_saint_and_city_town():
+    assert normalize_jurisdiction_key_name("St. Louis") == "saint louis"
+    assert jurisdiction_match_key("MO", "St. Louis city") == jurisdiction_match_key("MO", "Saint Louis")
 
 
 def test_partition_skips_represented_jurisdictions():
     all_j = [_j("FL", "Miami Beach"), _j("TX", "Austin"), _j("CA", "Oakland")]
-    represented = {("FL", "Miami Beach")}
-    pending, skipped = partition_jurisdictions(all_j, represented)
+    covered = {("FL", "miami beach")}
+    pending, skipped = partition_jurisdictions(all_j, covered)
     assert len(skipped) == 1
     assert skipped[0].jurisdiction_name == "Miami Beach"
     assert [j.jurisdiction_name for j in pending] == ["Austin", "Oakland"]
 
 
+def test_partition_dedupes_city_and_town_same_name():
+    all_j = [_j("CT", "Danbury", pop=86086), Jurisdiction("CT", "Danbury", "town", 86086)]
+    covered = {("CT", "danbury")}
+    pending, skipped = partition_jurisdictions(all_j, covered)
+    assert len(skipped) == 1
+    assert len(pending) == 0
+
+
 def test_limit_applied_after_skip():
     all_j = [_j("FL", f"City{i}") for i in range(5)] + [_j("TX", f"Town{i}") for i in range(5)]
-    represented = {("FL", f"City{i}") for i in range(5)}
-    pending, skipped = partition_jurisdictions(all_j, represented)
+    covered = {("FL", f"city{i}") for i in range(5)}
+    pending, skipped = partition_jurisdictions(all_j, covered)
     limited = pending[:3]
     assert len(skipped) == 5
     assert len(limited) == 3
@@ -190,7 +215,10 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
         _j("TX", "Plano"),
     ]
 
+    harvested_names: list[str] = []
+
     def fake_harvest(j, *args, **kwargs):
+        harvested_names.append(j.jurisdiction_name)
         if j.jurisdiction_name == "Austin":
             working_row = {
                 "state": j.state,
@@ -231,7 +259,7 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
                 "emails_found": "1",
                 "candidate_titles_found": "1",
                 "pages_fetched": "1",
-                "search_queries_run": "0",
+                "search_queries_run": "1",
                 "found_contact": "yes",
                 "final_rejection_reason": "",
                 "elapsed_seconds": "1",
@@ -242,6 +270,8 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
                 "max_page_limit_hit": "no",
                 "timeout_count": "0",
                 "fetch_error_count": "0",
+                "resolver_method": "search_official",
+                "planning_fallback_used": "no",
             }
             return working_row, None, diag
         diag = {
@@ -278,7 +308,9 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
                 mock_fetcher.return_value.__enter__.return_value = object()
                 result = run_find_more_contacts()
 
+    assert "Miami Beach" not in harvested_names
     assert result.jurisdictions_skipped_existing_count == 1
+    assert result.jurisdictions_available_after_skip_count == 3
     assert result.jurisdictions_processed_count == 2
     assert result.processed_jurisdictions[0]["jurisdiction_name"] == "Kissimmee"
     assert result.candidates_added_count == 1
@@ -304,6 +336,125 @@ def test_harvest_summary_message_explains_zero_contacts():
     msg = summary.format_message()
     assert "No new contacts added" in msg
     assert "no official site found" in msg.lower() or "29" in msg
+
+
+def test_drop_covered_working_rows():
+    covered = {("CO", "denver")}
+    rows = [
+        {"state": "CO", "jurisdiction_name": "Denver", "email": "a@denver.gov"},
+        {"state": "TX", "jurisdiction_name": "Austin", "email": "b@austin.gov"},
+    ]
+    kept = _drop_covered_working_rows(rows, covered)
+    assert len(kept) == 1
+    assert kept[0]["jurisdiction_name"] == "Austin"
+
+
+def test_stale_covered_working_not_counted_as_duplicate_after_crawl(harvest_paths):
+    working, outreach, _, _ = harvest_paths
+    crm = {col: "" for col in OUTREACH_COLUMNS}
+    crm.update(
+        {
+            "state": "CO",
+            "jurisdiction_name": "Denver",
+            "email": "planner@denver.gov",
+            "contact_name": "Denver Planner",
+            "send_status": "prepared",
+        }
+    )
+    write_outreach_rows([crm])
+    write_csv(
+        working,
+        [
+            {
+                "state": "CO",
+                "jurisdiction_name": "Denver",
+                "geography_type": "city",
+                "population": "700000",
+                "county_name": "",
+                "official_website_url": "https://denver.gov",
+                "planning_department_url": "",
+                "contact_name": "Denver Planner",
+                "contact_title": "Director",
+                "email": "planner@denver.gov",
+                "email_source_url": "https://denver.gov/plan",
+                "candidate_source_url": "",
+                "discovery_method": "test",
+                "latest_plan_year_found": "",
+                "active_update_signal": "",
+                "prospect_priority": "",
+                "prospect_priority_reason": "",
+                "jurisdiction_match_status": "matched",
+                "jurisdiction_match_notes": "",
+                "notes": "",
+                "review_status": "pending",
+                "outreach_status": "not_started",
+                "_status": "done",
+            }
+        ],
+        WORKING_COLUMNS,
+    )
+    covered = build_covered_jurisdiction_set([crm])
+    working_rows = _drop_covered_working_rows(read_csv(working, WORKING_COLUMNS), covered)
+    write_csv(working, working_rows, WORKING_COLUMNS)
+    total, new_count, stats = prepare_outreach(
+        append_only=True,
+        processed_jurisdiction_keys={("TX", "austin")},
+    )
+    assert total == 1
+    assert new_count == 0
+    assert stats.duplicate_after_crawl == 0
+
+
+def test_duplicate_after_crawl_counted_for_processed_jurisdiction(harvest_paths):
+    working, outreach, _, _ = harvest_paths
+    crm = {col: "" for col in OUTREACH_COLUMNS}
+    crm.update(
+        {
+            "state": "TX",
+            "jurisdiction_name": "Austin",
+            "email": "shared@example.gov",
+            "contact_name": "Existing",
+            "send_status": "prepared",
+        }
+    )
+    write_outreach_rows([crm])
+    write_csv(
+        working,
+        [
+            {
+                "state": "TX",
+                "jurisdiction_name": "Plano",
+                "geography_type": "city",
+                "population": "300000",
+                "county_name": "",
+                "official_website_url": "https://plano.gov",
+                "planning_department_url": "",
+                "contact_name": "Other Person",
+                "contact_title": "Planner",
+                "email": "shared@example.gov",
+                "email_source_url": "https://plano.gov/staff",
+                "candidate_source_url": "",
+                "discovery_method": "test",
+                "latest_plan_year_found": "",
+                "active_update_signal": "",
+                "prospect_priority": "",
+                "prospect_priority_reason": "",
+                "jurisdiction_match_status": "matched",
+                "jurisdiction_match_notes": "",
+                "notes": "",
+                "review_status": "pending",
+                "outreach_status": "not_started",
+                "_status": "done",
+            }
+        ],
+        WORKING_COLUMNS,
+    )
+    _, _, stats = prepare_outreach(
+        append_only=True,
+        processed_jurisdiction_keys={jurisdiction_match_key("TX", "Plano")},
+    )
+    assert stats.duplicate_after_crawl == 1
+    assert stats.duplicate_email == 1
 
 
 def test_ui_shows_harvest_summary_from_file(harvest_paths):
