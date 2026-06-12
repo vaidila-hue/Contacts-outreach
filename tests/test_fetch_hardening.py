@@ -10,7 +10,7 @@ from src.fetch_pages import FetchFailureRecord, PageFetcher, format_fetch_failur
 
 def test_fetch_retries_timeout_then_succeeds(monkeypatch):
     monkeypatch.setattr("src.fetch_pages.time.sleep", lambda _: None)
-    fetcher = PageFetcher(delay=0, use_fetch_cache=False, max_retries=2, planning_max_retries=2)
+    fetcher = PageFetcher(delay=0, force_refresh=True, use_fetch_cache=False, max_retries=2, planning_max_retries=2)
     responses = [
         httpx.TimeoutException("timeout"),
         httpx.Response(200, text="<html><body>ok</body></html>", headers={"content-type": "text/html"}),
@@ -26,7 +26,7 @@ def test_fetch_retries_timeout_then_succeeds(monkeypatch):
         return item
 
     fetcher.client.get = fake_get  # type: ignore[method-assign]
-    html = fetcher.fetch_html("https://example.gov/planning", profile="planning")
+    html = fetcher.fetch_html("https://retry-timeout-test.example.gov/planning", profile="planning")
     assert html is not None
     assert "ok" in html
     assert call_count == 2
@@ -50,7 +50,7 @@ def test_fetch_records_failure_diagnostics(monkeypatch):
 
 def test_fetch_retries_rate_limit(monkeypatch):
     monkeypatch.setattr("src.fetch_pages.time.sleep", lambda _: None)
-    fetcher = PageFetcher(delay=0, use_fetch_cache=False, planning_max_retries=2)
+    fetcher = PageFetcher(delay=0, force_refresh=True, use_fetch_cache=False, planning_max_retries=2)
     call_count = 0
 
     def fake_get(url, timeout=None):
@@ -65,7 +65,7 @@ def test_fetch_retries_rate_limit(monkeypatch):
         )
 
     fetcher.client.get = fake_get  # type: ignore[method-assign]
-    html = fetcher.fetch_html("https://city.gov/directory", profile="planning")
+    html = fetcher.fetch_html("https://retry-ratelimit-test.example.gov/directory", profile="planning")
     assert html is not None
     assert call_count == 2
     fetcher.close()
@@ -73,7 +73,7 @@ def test_fetch_retries_rate_limit(monkeypatch):
 
 def test_failed_fetch_not_cached_for_retry(monkeypatch):
     monkeypatch.setattr("src.fetch_pages.time.sleep", lambda _: None)
-    fetcher = PageFetcher(delay=0, use_fetch_cache=False, max_retries=0)
+    fetcher = PageFetcher(delay=0, force_refresh=True, use_fetch_cache=False, max_retries=0)
     calls = {"n": 0}
 
     def fake_get(url, timeout=None):
@@ -87,8 +87,9 @@ def test_failed_fetch_not_cached_for_retry(monkeypatch):
         )
 
     fetcher.client.get = fake_get  # type: ignore[method-assign]
-    assert fetcher.fetch_html("https://city.gov/planning", profile="default") is None
-    html = fetcher.fetch_html("https://city.gov/planning", profile="planning")
+    url = "https://retry-profile-test.example.gov/planning"
+    assert fetcher.fetch_html(url, profile="default") is None
+    html = fetcher.fetch_html(url, profile="planning")
     assert html is not None
     assert calls["n"] == 2
     fetcher.close()

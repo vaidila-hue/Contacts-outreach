@@ -23,6 +23,7 @@ from src.extract_contacts import (
     extract_profile_followups,
     is_high_confidence_contact,
     page_warrants_extraction,
+    recover_orphan_email_candidates,
     select_best_contact,
 )
 from src.extract_emails import classify_email, extract_emails_from_text, is_generic_email
@@ -124,6 +125,9 @@ class HarvestDiagnostics:
     planning_fallback_attempted: str = "no"
     planning_fallback_success: str = "no"
     fetch_failures_by_url: str = ""
+    orphan_emails_found: int = 0
+    orphan_emails_promoted: int = 0
+    candidate_pairing_failures: int = 0
 
 
 def diagnostics_row(
@@ -165,6 +169,9 @@ def diagnostics_row(
         "planning_fallback_attempted": hdiag.planning_fallback_attempted,
         "planning_fallback_success": hdiag.planning_fallback_success,
         "fetch_failures_by_url": hdiag.fetch_failures_by_url,
+        "orphan_emails_found": str(hdiag.orphan_emails_found),
+        "orphan_emails_promoted": str(hdiag.orphan_emails_promoted),
+        "candidate_pairing_failures": str(hdiag.candidate_pairing_failures),
     }
 
 
@@ -281,10 +288,12 @@ def _process_fetched_page(
     hdiag: HarvestDiagnostics,
     candidates: list[ContactCandidate],
     source_urls: list[str],
+    page_snapshots: list[tuple[str, str, str]],
     *,
     planning_url: str,
 ) -> str:
     """Extract contacts from a fetched page; return updated planning_url."""
+    page_snapshots.append((url, html, page_kind))
     if page_kind == "planning" or classify_page_url(url) == "planning":
         hdiag.planning_pages_found += 1
         hdiag.planning_page_found = True
@@ -308,6 +317,7 @@ def _crawl_official_site(
     hdiag: HarvestDiagnostics,
     candidates: list[ContactCandidate],
     source_urls: list[str],
+    page_snapshots: list[tuple[str, str, str]],
     config: HarvestConfig,
 ) -> str:
     """Priority crawl with per-kind limits and early stop."""
@@ -366,7 +376,15 @@ def _crawl_official_site(
             directory_pages_fetched += 1
 
         planning_url = _process_fetched_page(
-            html, url, page_kind, official, hdiag, candidates, source_urls, planning_url=planning_url
+            html,
+            url,
+            page_kind,
+            official,
+            hdiag,
+            candidates,
+            source_urls,
+            page_snapshots,
+            planning_url=planning_url,
         )
         return html
 
@@ -489,7 +507,9 @@ def harvest_jurisdiction(
 
     candidates: list[ContactCandidate] = []
     source_urls: list[str] = []
+    page_snapshots: list[tuple[str, str, str]] = []
     planning_url = ""
+    crawl_base = ""
 
     if official or manual_direct:
         crawl_base = official or manual_direct[0]
@@ -502,8 +522,18 @@ def harvest_jurisdiction(
             hdiag,
             candidates,
             source_urls,
+            page_snapshots,
             config,
         )
+        orphan_cands, orphans_found, orphans_promoted, pairing_failures = recover_orphan_email_candidates(
+            page_snapshots,
+            crawl_base,
+            candidates,
+        )
+        hdiag.orphan_emails_found = orphans_found
+        hdiag.orphan_emails_promoted = orphans_promoted
+        hdiag.candidate_pairing_failures = pairing_failures
+        candidates.extend(orphan_cands)
 
     hdiag.manual_url_result = "; ".join(manual_results)
     for c in candidates:
@@ -596,6 +626,15 @@ def harvest_jurisdiction(
         return result
 
     if match_status == "uncertain" and match_notes:
+        notes = match_notes
+
+    if best and best.orphan_recovered:
+        match_status = "uncertain"
+        orphan_note = (
+            "Orphan email recovery: planning title and direct email found on same page "
+            "but not structurally paired; verify contact before outreach."
+        )
+        match_notes = f"{match_notes}; {orphan_note}".strip("; ").strip() if match_notes else orphan_note
         notes = match_notes
 
     if best:

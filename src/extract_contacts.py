@@ -26,6 +26,7 @@ class ContactCandidate:
     email: str
     source_url: str
     paired_with_name: bool = False
+    orphan_recovered: bool = False
 
     @property
     def rank(self) -> int:
@@ -531,3 +532,97 @@ def select_best_contact(candidates: list[ContactCandidate]) -> ContactCandidate 
         return None
     valid.sort(key=lambda c: (_title_sort_key(c.title), c.name))
     return valid[0]
+
+
+PLANNING_RELATED_PAGE_KINDS: frozenset[str] = frozenset(
+    {"manual", "planning", "directory", "profile"}
+)
+
+PLANNING_URL_FRAGMENTS: tuple[str, ...] = (
+    "planning",
+    "community-development",
+    "community_development",
+    "development-services",
+    "development_services",
+    "staff",
+    "directory",
+    "zoning",
+    "land-use",
+    "landuse",
+)
+
+
+def is_planning_related_page(url: str, page_kind: str, html: str) -> bool:
+    if page_kind in PLANNING_RELATED_PAGE_KINDS:
+        return True
+    lower_url = url.lower()
+    if any(fragment in lower_url for fragment in PLANNING_URL_FRAGMENTS):
+        return True
+    sample = (html or "")[:8000].lower()
+    return any(kw in sample for kw in PLANNING_CONTEXT_WORDS)
+
+
+def _email_on_official_domain(email: str, official_url: str) -> bool:
+    from src.staff_discovery import official_netloc
+
+    host = email.split("@", 1)[1].lower()
+    official = official_netloc(official_url).lower()
+    official_base = official.removeprefix("www.")
+    host_base = host.removeprefix("www.")
+    return host == official or host_base == official_base or host.endswith(f".{official_base}")
+
+
+def recover_orphan_email_candidates(
+    page_snapshots: list[tuple[str, str, str]],
+    official_url: str,
+    existing_candidates: list[ContactCandidate],
+) -> tuple[list[ContactCandidate], int, int, int]:
+    """
+    Conservative recovery when direct municipal emails and allowlisted titles
+    appear on the same planning-related page but normal pairing failed.
+
+    Returns (new_candidates, orphans_found, orphans_promoted, pairing_failures).
+    """
+    from src.staff_discovery import is_same_official_site
+
+    existing_emails = {c.email for c in existing_candidates}
+    orphans_found = 0
+    pairing_failures = 0
+    by_email: dict[str, ContactCandidate] = {}
+
+    for url, html, page_kind in page_snapshots:
+        if not html or not is_same_official_site(url, official_url):
+            continue
+        if not is_planning_related_page(url, page_kind, html):
+            continue
+        page_title = matches_allowlisted_title(html)
+        if not page_title:
+            continue
+
+        for em in extract_emails_from_text(html):
+            if is_generic_email(em):
+                continue
+            if not _email_on_official_domain(em, official_url):
+                continue
+            if classify_email(em, infer_name_from_email(em), paired_with_name=True) != "direct":
+                continue
+            if em in existing_emails:
+                continue
+            orphans_found += 1
+            if em in by_email:
+                continue
+            pairing_failures += 1
+            name = infer_name_from_email(em)
+            candidate = ContactCandidate(
+                name=name,
+                title=page_title,
+                email=em,
+                source_url=url,
+                paired_with_name=True,
+                orphan_recovered=True,
+            )
+            existing = by_email.get(em)
+            if existing is None or _candidate_quality(candidate) < _candidate_quality(existing):
+                by_email[em] = candidate
+
+    return list(by_email.values()), orphans_found, len(by_email), pairing_failures

@@ -215,4 +215,7 @@ DIAGNOSTICS_COLUMNS = [
     "planning_fallback_attempted",
     "planning_fallback_success",
     "fetch_failures_by_url",
+    "orphan_emails_found",
+    "orphan_emails_promoted",
+    "candidate_pairing_failures",
 ]
