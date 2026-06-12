@@ -211,6 +211,8 @@ def test_ui_renders_simplified_controls(crm_paths):
         assert "Queue Ready Emails" in html
         assert "Pause Sending" in html
         assert "Send Next Now" in html
+        assert "Queue Settings" in html
+        assert "Cadence" in html or "5 min" in html
         assert "Queued:" in html or ">Queued<" in html
         assert "Default Message" in html
         assert "row-menu" in html

@@ -17,6 +17,11 @@ from src.send_queue import (
     resume_queue,
     send_next_queued,
 )
+from src.send_queue_config_store import (
+    SendQueueConfigSettings,
+    load_send_queue_config,
+    save_send_queue_config,
+)
 from src.send_queue_worker import get_worker_status, start_send_queue_worker
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
@@ -203,6 +208,8 @@ PAGE_TEMPLATE = """
     <div class="metric metric-compact"><span>Queued</span><strong>{{ queue_dashboard.queued }}</strong></div>
     <div class="metric metric-compact"><span>Sent today</span><strong>{{ queue_dashboard.sent_today }}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Next send</span><strong>{{ queue_dashboard.next_send }}</strong></div>
+    <div class="metric metric-compact metric-wide"><span>Cadence</span><strong>{{ queue_dashboard.cadence }}</strong></div>
+    <div class="metric metric-compact metric-wide"><span>Limit</span><strong>{{ queue_dashboard.limits }}</strong></div>
     <div class="metric metric-compact"><span>Worker</span><strong>{% if queue_dashboard.worker_alive == 'yes' %}running{% else %}stopped{% endif %}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Last tick</span><strong title="{{ queue_dashboard.worker_last_result }}">{{ queue_dashboard.worker_last_tick }}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Last harvest</span><strong id="harvest-last-run"{% if harvest_running %} class="harvest-running"{% endif %}>{% if harvest_running %}Finding contacts...{% elif harvest_dashboard %}{{ harvest_dashboard.last_run }}{% else %}—{% endif %}</strong></div>
@@ -226,6 +233,7 @@ PAGE_TEMPLATE = """
       <button formaction="{{ url_for('resume_send_queue') }}" formmethod="post" type="submit" class="btn">Resume Sending</button>
       <button formaction="{{ url_for('cancel_send_queue') }}" formmethod="post" type="submit" class="btn" onclick="return confirm('Remove all queued contacts from the send queue?')">Cancel Queue</button>
       <button formaction="{{ url_for('send_next_now') }}" formmethod="post" type="submit" class="btn">Send Next Now</button>
+      <button type="button" class="btn" onclick="document.getElementById('queue-settings-modal').classList.add('open')">Queue Settings</button>
       <button type="button" class="btn" onclick="document.getElementById('harvest-modal').classList.add('open')">Reconfigure Contact Harvest</button>
       <button formaction="{{ url_for('find_more') }}" formmethod="post" type="submit" onclick="return confirm('Run harvest and append new contacts? This may take several minutes.')">Find More Contacts</button>
       <a class="btn" href="{{ url_for('test_email') }}">Send Test Email</a>
@@ -310,6 +318,26 @@ PAGE_TEMPLATE = """
       </tbody>
     </table>
   </form>
+
+  <div id="queue-settings-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h2>Queue Settings</h2>
+      <form method="post" action="{{ url_for('save_send_queue_settings') }}">
+        <label>Interval minutes</label>
+        <input type="number" name="interval_minutes" min="1" value="{{ send_queue_config.interval_minutes }}">
+        <label>Jitter seconds</label>
+        <input type="number" name="jitter_seconds" min="0" value="{{ send_queue_config.jitter_seconds }}">
+        <label>Max emails per hour</label>
+        <input type="number" name="max_per_hour" min="1" value="{{ send_queue_config.max_per_hour }}">
+        <label>Max emails per day</label>
+        <input type="number" name="max_per_day" min="1" value="{{ send_queue_config.max_per_day }}">
+        <div class="actions">
+          <button type="button" onclick="document.getElementById('queue-settings-modal').classList.remove('open')">Cancel</button>
+          <button type="submit">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="default-message-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
     <div class="modal" onclick="event.stopPropagation()">
@@ -607,6 +635,7 @@ def create_app(*, start_worker: bool = False) -> Flask:
             message = harvest_summary.format_message()
         harvest_config = load_harvest_config()
         default_message = load_default_message()
+        send_queue_config = load_send_queue_config()
         return render_template_string(
             PAGE_TEMPLATE,
             rows=rows,
@@ -619,6 +648,7 @@ def create_app(*, start_worker: bool = False) -> Flask:
             harvest_dashboard=harvest_dashboard,
             harvest_running=harvest_running,
             queue_dashboard=queue_dashboard,
+            send_queue_config=send_queue_config,
             default_message=default_message,
             us_states=US_STATE_CODES,
             message=message,
@@ -699,6 +729,28 @@ def create_app(*, start_worker: bool = False) -> Flask:
         if count == 0:
             return redirect(url_for("index", msg=msg))
         return redirect(url_for("index", msg=msg))
+
+    @app.post("/send-queue/settings")
+    def save_send_queue_settings():
+        try:
+            settings = SendQueueConfigSettings(
+                interval_minutes=max(1, int(request.form.get("interval_minutes", 5))),
+                jitter_seconds=max(0, int(request.form.get("jitter_seconds", 90))),
+                max_per_hour=max(1, int(request.form.get("max_per_hour", 12))),
+                max_per_day=max(1, int(request.form.get("max_per_day", 75))),
+            )
+        except (TypeError, ValueError):
+            return redirect(url_for("index", msg="Invalid queue settings."))
+        save_send_queue_config(settings)
+        return redirect(
+            url_for(
+                "index",
+                msg=(
+                    f"Queue settings saved: {settings.cadence_display()}; "
+                    f"limit {settings.limits_display()}."
+                ),
+            )
+        )
 
     @app.post("/send-queue/pause")
     def pause_send_queue():

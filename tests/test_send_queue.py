@@ -51,6 +51,11 @@ def queue_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "OUTREACH_CSV", outreach)
     monkeypatch.setattr(store, "WORKING_CSV", working)
     monkeypatch.setattr(sq, "SEND_QUEUE_STATE_JSON", queue_state)
+    cfg = tmp_path / "send_queue_config.json"
+    monkeypatch.setattr(paths, "SEND_QUEUE_CONFIG_JSON", cfg)
+    import src.send_queue_config_store as sqcs
+
+    monkeypatch.setattr(sqcs, "SEND_QUEUE_CONFIG_JSON", cfg)
     return working, outreach, queue_state
 
 
@@ -334,6 +339,12 @@ def test_queue_resumes_after_restart(queue_paths):
     service = MockGmailService()
     ok, _ = send_next_queued(service=service, force_now=False)
     assert ok
+
+
+def test_dashboard_shows_cadence_and_limits(queue_paths):
+    dashboard = compute_queue_dashboard()
+    assert dashboard["cadence"] == "5 min ±90s"
+    assert dashboard["limits"] == "12/hr · 75/day"
 
 
 def test_queue_four_rows_does_not_send_immediately(queue_paths):

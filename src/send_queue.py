@@ -23,14 +23,23 @@ from src.outreach_store import (
 )
 from src.outreach_template import render_row_email
 from src.paths import SEND_QUEUE_STATE_JSON
+from src.send_queue_config_store import (
+    DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_JITTER_SECONDS,
+    DEFAULT_MAX_PER_DAY,
+    DEFAULT_MAX_PER_HOUR,
+    SendQueueConfigSettings,
+    load_send_queue_config,
+)
 
 QUEUED_STATUS = "queued"
 SENDING_STATUS = "sending"
 
-BASE_INTERVAL_SECONDS = 300
-JITTER_SECONDS = 90
-MAX_EMAILS_PER_DAY = 25
-MAX_EMAILS_PER_HOUR = 10
+# Default values (see send_queue_config.json for runtime settings)
+BASE_INTERVAL_SECONDS = DEFAULT_INTERVAL_MINUTES * 60
+JITTER_SECONDS = DEFAULT_JITTER_SECONDS
+MAX_EMAILS_PER_DAY = DEFAULT_MAX_PER_DAY
+MAX_EMAILS_PER_HOUR = DEFAULT_MAX_PER_HOUR
 
 _send_lock = threading.Lock()
 
@@ -76,11 +85,13 @@ def compute_next_send_at(
     *,
     now: datetime | None = None,
     rng: random.Random | None = None,
+    config: SendQueueConfigSettings | None = None,
 ) -> str:
     now = now or _now_utc()
     rng = rng or random.Random()
-    jitter = rng.randint(-JITTER_SECONDS, JITTER_SECONDS)
-    nxt = now + timedelta(seconds=BASE_INTERVAL_SECONDS + jitter)
+    config = config or load_send_queue_config()
+    jitter = rng.randint(-config.jitter_seconds, config.jitter_seconds)
+    nxt = now + timedelta(seconds=config.interval_seconds + jitter)
     return nxt.replace(microsecond=0).isoformat()
 
 
@@ -123,14 +134,20 @@ def sent_since(rows: list[dict[str, str]], since: datetime) -> int:
     return count
 
 
-def rate_limits_exceeded(rows: list[dict[str, str]] | None = None, *, now: datetime | None = None) -> tuple[bool, str]:
+def rate_limits_exceeded(
+    rows: list[dict[str, str]] | None = None,
+    *,
+    now: datetime | None = None,
+    config: SendQueueConfigSettings | None = None,
+) -> tuple[bool, str]:
     now = now or _now_utc()
     rows = rows if rows is not None else read_outreach_rows()
+    config = config or load_send_queue_config()
     hour_ago = now - timedelta(hours=1)
     day_ago = now - timedelta(hours=24)
-    if sent_since(rows, day_ago) >= MAX_EMAILS_PER_DAY:
+    if sent_since(rows, day_ago) >= config.max_per_day:
         return True, "daily limit reached"
-    if sent_since(rows, hour_ago) >= MAX_EMAILS_PER_HOUR:
+    if sent_since(rows, hour_ago) >= config.max_per_hour:
         return True, "hourly limit reached"
     return False, ""
 
@@ -346,10 +363,13 @@ def compute_queue_dashboard(rows: list[dict[str, str]] | None = None) -> dict[st
     from src.send_queue_worker import get_worker_status
 
     worker = get_worker_status()
+    config = load_send_queue_config()
     return {
         "queued": str(len(queued_rows(rows))),
         "sent_today": str(sent_since(rows, day_ago)),
         "next_send": format_next_send_display(state, rows),
+        "cadence": config.cadence_display(),
+        "limits": config.limits_display(),
         "paused": "yes" if state.paused else "no",
         "block_reason": block,
         "worker_running": "yes" if worker.started else "no",
