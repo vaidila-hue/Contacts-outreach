@@ -2,11 +2,13 @@
 
 from src.harvest_summary import HarvestRunSummary
 from src.harvest_report import (
+    _fmt_ts_et,
     analyze_harvest_run,
     discovery_implementation_label,
     format_harvest_dashboard,
     render_harvest_report_md,
 )
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def test_discovery_implementation_label_is_site_discovery():
@@ -57,7 +59,55 @@ def test_format_harvest_dashboard():
     dash = format_harvest_dashboard(summary)
     assert dash["jurisdictions_processed"] == "60"
     assert dash["new_contacts"] == "6"
-    assert dash["discovery_impl"] == "legacy"
+    assert dash["last_run"] == "06/11/26 7:17 PM ET"
+
+
+def test_fmt_ts_et_fallback_when_zoneinfo_missing(monkeypatch):
+    import src.harvest_report as hr
+
+    real_zoneinfo = ZoneInfo
+
+    def fake_zoneinfo(key):
+        if key == "America/New_York":
+            raise ZoneInfoNotFoundError("No time zone found with key America/New_York")
+        return real_zoneinfo(key)
+
+    monkeypatch.setattr(hr, "ZoneInfo", fake_zoneinfo)
+    assert _fmt_ts_et("2026-06-11T23:17:42+00:00") == "06/11/26 6:17 PM ET"
+
+
+def test_crm_index_loads_when_zoneinfo_missing(tmp_path, monkeypatch):
+    import json
+    import src.harvest_report as hr
+    import src.harvest_summary as hs
+    import src.paths as paths
+    from src.outreach_ui import create_app
+
+    summary_path = tmp_path / "last_harvest_summary.json"
+    monkeypatch.setattr(paths, "LAST_HARVEST_SUMMARY_JSON", summary_path)
+    monkeypatch.setattr(hs, "LAST_HARVEST_SUMMARY_JSON", summary_path)
+
+    summary = HarvestRunSummary(
+        run_completed_at="2026-06-11T23:17:42+00:00",
+        jurisdictions_processed_count=10,
+        candidates_added_count=2,
+    )
+    summary_path.write_text(json.dumps(summary.__dict__, indent=2), encoding="utf-8")
+
+    def fake_zoneinfo(key):
+        if key == "America/New_York":
+            raise ZoneInfoNotFoundError("No time zone found with key America/New_York")
+        return ZoneInfo(key)
+
+    monkeypatch.setattr(hr, "ZoneInfo", fake_zoneinfo)
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.get("/")
+        assert resp.status_code == 200
+        html = resp.data.decode("utf-8")
+        assert "Planzookie Outreach CRM" in html
+        assert "6:17 PM ET" in html
 
 
 def test_render_report_includes_recommendation():

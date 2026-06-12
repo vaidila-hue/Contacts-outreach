@@ -476,3 +476,6 @@ def test_ui_shows_harvest_summary_from_file(harvest_paths):
         html = resp.data.decode("utf-8")
         assert "Harvest complete" in html
         assert "no_official_site_found" in html
+        assert "Last harvest" in html
+        assert "harvest-panel" not in html
+        assert "Recommendation" not in html

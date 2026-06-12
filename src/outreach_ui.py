@@ -46,15 +46,15 @@ PAGE_TEMPLATE = """
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
     h1 { margin-bottom: 8px; }
-    .dashboard { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 12px; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
-    .harvest-panel { margin: 0 0 12px; padding: 10px 12px; background: #f9fafb; border: 1px solid #ccd; font-size: 13px; }
-    .harvest-panel h2 { margin: 0 0 8px; font-size: 15px; }
-    .harvest-grid { display: flex; flex-wrap: wrap; gap: 14px 24px; }
-    .harvest-grid div strong { display: block; font-size: 16px; }
-    .harvest-meta { color: #444; margin-top: 6px; font-size: 12px; }
-    .harvest-warn { color: #854; }
-    .metric { min-width: 100px; }
-    .metric strong { display: block; font-size: 20px; }
+    .dashboard { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; margin: 0 0 12px; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
+    .metric { min-width: 72px; }
+    .metric strong { display: block; font-size: 20px; line-height: 1.15; }
+    .metric span { display: block; font-size: 11px; color: #444; line-height: 1.2; margin-bottom: 2px; }
+    .metric-compact { min-width: 58px; }
+    .metric-compact strong { font-size: 14px; font-weight: 600; }
+    .metric-compact.metric-wide { min-width: 108px; }
+    .metric-compact.metric-wide strong { font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .harvest-running { color: #06c; font-size: 12px !important; font-weight: 600 !important; }
     .filters { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
     .filters a { padding: 4px 10px; border: 1px solid #888; text-decoration: none; color: #111; font-size: 13px; }
     .filters a.active { background: #333; color: #fff; }
@@ -117,6 +117,27 @@ PAGE_TEMPLATE = """
       setTimeout(hide, 5000);
     }
     document.addEventListener('DOMContentLoaded', initFlashMessage);
+    function showHarvestRunning() {
+      var el = document.getElementById('harvest-last-run');
+      if (el) {
+        el.textContent = 'Finding contacts...';
+        el.classList.add('harvest-running');
+      }
+    }
+    function bindHarvestButtons() {
+      var form = document.getElementById('crm-form');
+      if (!form) return;
+      form.querySelectorAll('[formaction*="find-more"], [formaction*="harvest-config/run"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (btn.type === 'submit') showHarvestRunning();
+        });
+      });
+      var modalRun = document.querySelector('#harvest-modal [formaction*="harvest-config/run"]');
+      if (modalRun) {
+        modalRun.addEventListener('click', function() { showHarvestRunning(); });
+      }
+    }
+    document.addEventListener('DOMContentLoaded', bindHarvestButtons);
     function openDefaultMessageModal() {
       document.getElementById('default-message-modal').classList.add('open');
     }
@@ -170,30 +191,11 @@ PAGE_TEMPLATE = """
     <div class="metric"><span>Ready</span><strong>{{ stats.ready }}</strong></div>
     <div class="metric"><span>Sent</span><strong>{{ stats.sent }}</strong></div>
     <div class="metric"><span>Replies</span><strong>{{ stats.replies }}</strong></div>
+    <div class="metric metric-compact metric-wide"><span>Last harvest</span><strong id="harvest-last-run"{% if harvest_running %} class="harvest-running"{% endif %}>{% if harvest_running %}Finding contacts...{% elif harvest_dashboard %}{{ harvest_dashboard.last_run }}{% else %}—{% endif %}</strong></div>
+    <div class="metric metric-compact"><span>Processed</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.jurisdictions_processed }}{% else %}—{% endif %}</strong></div>
+    <div class="metric metric-compact"><span>New contacts</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.new_contacts }}{% else %}—{% endif %}</strong></div>
+    <div class="metric metric-compact"><span>No-contact</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.no_contact_jurisdictions }}{% else %}—{% endif %}</strong></div>
   </div>
-
-  {% if harvest_dashboard %}
-  <div class="harvest-panel">
-    <h2>Last harvest</h2>
-    <div class="harvest-grid">
-      <div><span>Completed</span><strong>{{ harvest_dashboard.last_run }}</strong></div>
-      <div><span>Processed</span><strong>{{ harvest_dashboard.jurisdictions_processed }}</strong></div>
-      <div><span>Skipped (in CRM)</span><strong>{{ harvest_dashboard.skipped_existing }}</strong></div>
-      <div><span>New contacts</span><strong>{{ harvest_dashboard.new_contacts }}</strong></div>
-      <div><span>Duplicates after crawl</span><strong>{{ harvest_dashboard.duplicates_skipped }}</strong></div>
-      <div><span>No-contact jurisdictions</span><strong>{{ harvest_dashboard.no_contact_jurisdictions }}</strong></div>
-    </div>
-    <div class="harvest-meta">
-      Discovery: {{ harvest_dashboard.discovery_impl }}
-      {% if harvest_summary and harvest_summary.recommendation_code %}
-      · Recommendation {{ harvest_summary.recommendation_code }}
-      {% endif %}
-      {% if harvest_dashboard.discovery_impl.startswith('legacy') %}
-      <span class="harvest-warn"> — re-run harvest to use improved site discovery.</span>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
 
   <div class="filters">
     {% for key, label in filter_options %}
@@ -543,9 +545,11 @@ def create_app() -> Flask:
         harvest_dashboard = None
         from src.harvest_summary import load_harvest_summary
         from src.harvest_report import build_report_from_summary_file, format_harvest_dashboard
+        from src.harvest_status import is_harvest_running
 
+        harvest_running = is_harvest_running()
         harvest_summary = load_harvest_summary()
-        if harvest_summary:
+        if harvest_summary and not harvest_running:
             if not harvest_summary.discovery_implementation:
                 build_report_from_summary_file()
                 harvest_summary = load_harvest_summary()
@@ -564,6 +568,7 @@ def create_app() -> Flask:
             harvest_config=harvest_config,
             harvest_summary=harvest_summary,
             harvest_dashboard=harvest_dashboard,
+            harvest_running=harvest_running,
             default_message=default_message,
             us_states=US_STATE_CODES,
             message=message,

@@ -13,6 +13,7 @@ from src.export_results import merge_working_row, write_diagnostics_csv, write_r
 from src.fetch_pages import PageFetcher
 from src.harvest_config_store import HarvestConfigSettings, load_harvest_config
 from src.harvest_report import analyze_harvest_run, enrich_summary, save_harvest_report
+from src.harvest_status import clear_harvest_running, set_harvest_running
 from src.harvest_summary import (
     HarvestRunSummary,
     build_covered_jurisdiction_set,
@@ -73,6 +74,15 @@ def _drop_covered_working_rows(
 
 
 def run_find_more_contacts() -> HarvestRunSummary:
+    """Harvest using saved config; skip CRM jurisdictions; append new outreach contacts only."""
+    set_harvest_running()
+    try:
+        return _run_find_more_contacts_impl()
+    finally:
+        clear_harvest_running()
+
+
+def _run_find_more_contacts_impl() -> HarvestRunSummary:
     """Harvest using saved config; skip CRM jurisdictions; append new outreach contacts only."""
     started = now_iso()
     config = load_harvest_config()

@@ -5,7 +5,8 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 
 from src.harvest_config import HarvestConfig
@@ -298,6 +299,41 @@ def enrich_summary(summary: HarvestRunSummary, analysis: RunAnalysis) -> Harvest
     return summary
 
 
+EASTERN_TZ_NAME = "America/New_York"
+_EST_FALLBACK = timezone(timedelta(hours=-5))
+
+
+def _format_dashboard_ts(dt: datetime, label: str) -> str:
+    hour = dt.hour % 12 or 12
+    ampm = "AM" if dt.hour < 12 else "PM"
+    return f"{dt.month:02d}/{dt.day:02d}/{dt.year % 100:02d} {hour}:{dt.minute:02d} {ampm} {label}"
+
+
+def _parse_iso_utc(iso: str) -> datetime:
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _fmt_ts_et(iso: str) -> str:
+    """Format ISO timestamp as MM/DD/YY h:mm AM/PM ET for CRM dashboard."""
+    if not iso:
+        return "—"
+    try:
+        dt = _parse_iso_utc(iso)
+    except ValueError:
+        return iso
+    try:
+        try:
+            local = dt.astimezone(ZoneInfo(EASTERN_TZ_NAME))
+        except ZoneInfoNotFoundError:
+            local = dt.astimezone(_EST_FALLBACK)
+        return _format_dashboard_ts(local, "ET")
+    except Exception:
+        return _format_dashboard_ts(dt.astimezone(timezone.utc), "UTC")
+
+
 def _fmt_ts(iso: str) -> str:
     if not iso:
         return "—"
@@ -318,13 +354,10 @@ def format_harvest_dashboard(summary: HarvestRunSummary) -> dict[str, str]:
             if item.get("reason") in ("no_official_site_found", "no_planning_contact_found")
         )
     return {
-        "last_run": _fmt_ts(summary.run_completed_at or summary.run_started_at),
+        "last_run": _fmt_ts_et(summary.run_completed_at or summary.run_started_at),
         "jurisdictions_processed": str(summary.jurisdictions_processed_count),
-        "skipped_existing": str(summary.jurisdictions_skipped_existing_count),
         "new_contacts": str(summary.candidates_added_count),
-        "duplicates_skipped": str(summary.duplicate_after_crawl_count or summary.duplicates_skipped_count),
         "no_contact_jurisdictions": str(no_contact or summary.rejected_count),
-        "discovery_impl": summary.discovery_implementation or "unknown",
     }
 
 
