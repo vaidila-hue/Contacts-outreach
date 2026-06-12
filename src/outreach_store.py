@@ -402,5 +402,6 @@ def apply_failure(row: dict[str, str], error: str) -> None:
         if outreach_key(r) == key:
             r["send_status"] = "failed"
             r["error"] = error[:500]
+            r["send_error"] = error[:500]
             break
     write_outreach_rows(rows)

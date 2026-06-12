@@ -100,6 +100,7 @@ def test_crm_index_loads_when_zoneinfo_missing(tmp_path, monkeypatch):
         return ZoneInfo(key)
 
     monkeypatch.setattr(hr, "ZoneInfo", fake_zoneinfo)
+    monkeypatch.setattr("src.harvest_status.is_harvest_running", lambda: False)
     app = create_app()
     app.config["TESTING"] = True
     with app.test_client() as client:

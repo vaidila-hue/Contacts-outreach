@@ -189,7 +189,7 @@ def test_filters():
     assert row_matches_filter(row, "ready")
     assert row_matches_filter({"send_status": "sent"}, "sent")
     assert row_matches_filter({"send_status": "sent", "approved": "yes"}, "ready") is False
-    assert len(FILTER_OPTIONS) == 7
+    assert len(FILTER_OPTIONS) == 8
 
 
 def test_duplicate_prevention():
@@ -228,7 +228,7 @@ def test_crm_ui_renders_dashboard_and_save(crm_paths):
         resp = client.get("/")
         assert resp.status_code == 200
         assert b"Save changes" in resp.data
-        assert b"Send Ready Emails" in resp.data
+        assert b"Queue Ready Emails" in resp.data
 
         resp = client.post(
             "/save",

@@ -9,7 +9,6 @@ from typing import Any
 
 import httpx
 
-from src.paths import JURISDICTIONS_CSV
 from src.csv_utils import write_csv
 from src.jurisdiction_utils import normalize_jurisdiction_name
 
@@ -320,14 +319,19 @@ def seed_jurisdictions(
 
 
 def save_jurisdictions(jurisdictions: list[Jurisdiction], path=None) -> None:
-    path = path or JURISDICTIONS_CSV
+    if path is None:
+        from src.paths import JURISDICTIONS_CSV
+
+        path = JURISDICTIONS_CSV
     write_csv(path, [j.to_dict() for j in jurisdictions], JURISDICTION_COLUMNS)
 
 
 def load_jurisdictions(path=None) -> list[Jurisdiction]:
     from src.csv_utils import read_csv
+    if path is None:
+        from src.paths import JURISDICTIONS_CSV
 
-    path = path or JURISDICTIONS_CSV
+        path = JURISDICTIONS_CSV
     rows = read_csv(path)
     return [
         Jurisdiction(

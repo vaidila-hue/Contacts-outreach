@@ -18,6 +18,7 @@ data/last_harvest_summary.json
 data/last_harvest_diagnostics.json
 data/last_harvest_report.md
 data/harvest_running.lock
+data/send_queue_state.json
 data/build_log.txt
 
 # Harvest config (optional)

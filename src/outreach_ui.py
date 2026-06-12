@@ -9,7 +9,15 @@ from flask import Flask, redirect, render_template_string, request, url_for
 from src.gmail_client import build_gmail_service, verify_gmail_account
 from src.harvest_config_store import HarvestConfigSettings, load_harvest_config, save_harvest_config as persist_harvest_config
 from src.harvest_runner import run_find_more_contacts
-from src.outreach_cli import run_outreach_send_ready
+from src.send_queue import (
+    cancel_queue,
+    compute_queue_dashboard,
+    pause_queue,
+    queue_ready_contacts,
+    resume_queue,
+    send_next_queued,
+)
+from src.send_queue_worker import start_send_queue_worker
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
     delete_outreach_row,
@@ -66,6 +74,7 @@ PAGE_TEMPLATE = """
     .actions button, .actions a.btn { padding: 8px 12px; cursor: pointer; text-decoration: none; color: #111; border: 1px solid #888; background: #fafafa; display: inline-block; font-size: 13px; }
     .status-sent { color: #0a0; font-weight: bold; }
     .status-failed { color: #a00; font-weight: bold; }
+    .status-queued { color: #06c; font-weight: bold; }
     input[type=text], input[type=datetime-local], select, textarea { width: 100%; min-width: 70px; box-sizing: border-box; font-size: 12px; }
     textarea { min-height: 48px; }
     .msg { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 10px; background: #eef6ff; border: 1px solid #99c; margin-bottom: 12px; }
@@ -191,6 +200,9 @@ PAGE_TEMPLATE = """
     <div class="metric"><span>Ready</span><strong>{{ stats.ready }}</strong></div>
     <div class="metric"><span>Sent</span><strong>{{ stats.sent }}</strong></div>
     <div class="metric"><span>Replies</span><strong>{{ stats.replies }}</strong></div>
+    <div class="metric metric-compact"><span>Queued</span><strong>{{ queue_dashboard.queued }}</strong></div>
+    <div class="metric metric-compact"><span>Sent today</span><strong>{{ queue_dashboard.sent_today }}</strong></div>
+    <div class="metric metric-compact metric-wide"><span>Next send</span><strong>{{ queue_dashboard.next_send }}</strong></div>
     <div class="metric metric-compact metric-wide"><span>Last harvest</span><strong id="harvest-last-run"{% if harvest_running %} class="harvest-running"{% endif %}>{% if harvest_running %}Finding contacts...{% elif harvest_dashboard %}{{ harvest_dashboard.last_run }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>Processed</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.jurisdictions_processed }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>New contacts</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.new_contacts }}{% else %}—{% endif %}</strong></div>
@@ -207,7 +219,11 @@ PAGE_TEMPLATE = """
     <div class="actions">
       <button type="submit">Save changes</button>
       <button type="button" class="btn" onclick="openDefaultMessageModal()">Default Message</button>
-      <button formaction="{{ url_for('send_ready') }}" formmethod="post" type="submit" onclick="return confirm('Send all Ready contacts? Emails go out one at a time.')">Send Ready Emails</button>
+      <button formaction="{{ url_for('queue_ready') }}" formmethod="post" type="submit" onclick="return confirm('Queue all Ready contacts for throttled sending?')">Queue Ready Emails</button>
+      <button formaction="{{ url_for('pause_send_queue') }}" formmethod="post" type="submit" class="btn">Pause Sending</button>
+      <button formaction="{{ url_for('resume_send_queue') }}" formmethod="post" type="submit" class="btn">Resume Sending</button>
+      <button formaction="{{ url_for('cancel_send_queue') }}" formmethod="post" type="submit" class="btn" onclick="return confirm('Remove all queued contacts from the send queue?')">Cancel Queue</button>
+      <button formaction="{{ url_for('send_next_now') }}" formmethod="post" type="submit" class="btn">Send Next Now</button>
       <button type="button" class="btn" onclick="document.getElementById('harvest-modal').classList.add('open')">Reconfigure Contact Harvest</button>
       <button formaction="{{ url_for('find_more') }}" formmethod="post" type="submit" onclick="return confirm('Run harvest and append new contacts? This may take several minutes.')">Find More Contacts</button>
       <a class="btn" href="{{ url_for('test_email') }}">Send Test Email</a>
@@ -240,10 +256,10 @@ PAGE_TEMPLATE = """
             <input type="hidden" id="orig-jurisdiction-{{ idx }}" name="_orig_jurisdiction_name" value="{{ row._orig_jurisdiction_name }}">
             <input type="checkbox" name="approved_{{ idx }}" value="yes"
               {% if row.approved == 'yes' %}checked{% endif %}
-              {% if row.send_status == 'sent' %}disabled{% endif %}>
+              {% if row.send_status in ('sent', 'queued', 'sending') %}disabled{% endif %}>
           </td>
           <td><input type="text" name="greeting_name_{{ idx }}" value="{{ row.greeting_name }}"></td>
-          <td class="{% if row.send_status == 'sent' %}status-sent{% elif row.send_status == 'failed' %}status-failed{% endif %}">{{ row.send_status or 'prepared' }}</td>
+          <td class="{% if row.send_status == 'sent' %}status-sent{% elif row.send_status in ('failed',) %}status-failed{% elif row.send_status == 'queued' %}status-queued{% endif %}">{{ row.send_status or 'prepared' }}</td>
           <td>{{ row.sent_at_display }}</td>
           <td><input type="text" name="jurisdiction_name_{{ idx }}" value="{{ row.jurisdiction_name }}"></td>
           <td><input type="text" name="state_{{ idx }}" value="{{ row.state }}" maxlength="2" style="max-width:40px"></td>
@@ -531,8 +547,11 @@ def _parse_harvest_form() -> HarvestConfigSettings:
     )
 
 
-def create_app() -> Flask:
+def create_app(*, start_worker: bool = False) -> Flask:
     app = Flask(__name__)
+
+    if start_worker:
+        start_send_queue_worker(testing=False)
 
     @app.get("/")
     def index():
@@ -541,6 +560,7 @@ def create_app() -> Flask:
         stats = compute_dashboard(all_rows)
         rows = _display_rows(all_rows, filter_name)
         message = request.args.get("msg", "")
+        queue_dashboard = compute_queue_dashboard(all_rows)
         harvest_summary = None
         harvest_dashboard = None
         from src.harvest_summary import load_harvest_summary
@@ -569,6 +589,7 @@ def create_app() -> Flask:
             harvest_summary=harvest_summary,
             harvest_dashboard=harvest_dashboard,
             harvest_running=harvest_running,
+            queue_dashboard=queue_dashboard,
             default_message=default_message,
             us_states=US_STATE_CODES,
             message=message,
@@ -640,20 +661,46 @@ def create_app() -> Flask:
         msg = "Row message saved." if ok else "Row not found."
         return redirect(url_for("index", msg=msg))
 
-    @app.post("/send-ready")
-    def send_ready():
+    @app.post("/queue-ready")
+    def queue_ready():
         updates = _parse_form_updates()
         if updates:
             update_outreach_rows(updates)
-        args = argparse.Namespace(delay_seconds=2.0)
+        count, msg = queue_ready_contacts()
+        if count == 0:
+            return redirect(url_for("index", msg=msg))
+        return redirect(url_for("index", msg=msg))
+
+    @app.post("/send-queue/pause")
+    def pause_send_queue():
+        pause_queue()
+        return redirect(url_for("index", msg="Send queue paused."))
+
+    @app.post("/send-queue/resume")
+    def resume_send_queue():
+        resume_queue()
+        return redirect(url_for("index", msg="Send queue resumed."))
+
+    @app.post("/send-queue/cancel")
+    def cancel_send_queue():
+        cleared = cancel_queue()
+        return redirect(url_for("index", msg=f"Removed {cleared} contact(s) from queue."))
+
+    @app.post("/send-queue/send-next")
+    def send_next_now():
         try:
             service = build_gmail_service()
             verify_gmail_account(service)
-            code = run_outreach_send_ready(args, service=service)
+            ok, detail = send_next_queued(service=service, force_now=True)
         except Exception as exc:
             return redirect(url_for("index", msg=f"Send error: {exc}"))
-        msg = "Ready emails sent." if code == 0 else "Send failed."
+        msg = f"Sent: {detail}" if ok else f"Not sent: {detail}"
         return redirect(url_for("index", msg=msg))
+
+    @app.post("/send-ready")
+    def send_ready():
+        """Legacy route: queue instead of immediate send."""
+        return queue_ready()
 
     @app.get("/test")
     def test_email():
@@ -711,7 +758,7 @@ def run_outreach_server(
     if port != OUTREACH_PORT:
         raise ValueError(f"Contacts CRM must use port {OUTREACH_PORT}, not {port}")
     check_port_available(host, port)
-    app = create_app()
+    app = create_app(start_worker=True)
     print(f"Outreach CRM UI: {CRM_URL}")
     print(f"Test email:      {CRM_URL}/test")
     if open_browser:

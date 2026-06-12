@@ -152,50 +152,9 @@ def run_outreach_send(args: argparse.Namespace, service: GmailService | None = N
 
 
 def run_outreach_send_ready(args: argparse.Namespace, service: GmailService | None = None) -> int:
-    """Send all Ready, unsent rows one at a time. Stops on first failure."""
-    delay = getattr(args, "delay_seconds", 2.0)
-    rows = read_outreach_rows()
-    to_send = ready_send_candidates(rows)
-    if not to_send:
-        print("No Ready contacts to send.")
-        return 0
+    """Queue all Ready contacts for throttled sending (does not send immediately)."""
+    from src.send_queue import queue_ready_contacts
 
-    if service is None:
-        try:
-            service = build_gmail_service()
-            verify_gmail_account(service)
-        except (GmailAccountError, FileNotFoundError) as exc:
-            print(f"ERROR: {exc}")
-            return 1
-
-    sent = 0
-    for row in to_send:
-        if row.get("send_status") == "sent":
-            continue
-        if not is_ready(row):
-            continue
-        if not is_outreach_sendable(row):
-            print(f"Skipping invalid row: {row.get('email')}")
-            apply_failure(row, "invalid email or blank subject/body")
-            continue
-
-        subject, body = render_row_email(row)
-        send_row = dict(row)
-        send_row["subject"] = subject
-        send_row["body"] = body
-        print(preview_action("SEND", send_row))
-        try:
-            message_id = service.send_message(row["email"], subject, body)
-            apply_send_result(row, message_id)
-            print(f"  Sent Gmail message id={message_id}")
-            sent += 1
-            rows = read_outreach_rows()
-            if delay and sent < len(to_send):
-                time.sleep(delay)
-        except Exception as exc:
-            apply_failure(row, str(exc))
-            print(f"  Send failed: {exc}")
-            return 1
-
-    print(f"Sent {sent} Ready contact(s).")
-    return 0
+    count, message = queue_ready_contacts()
+    print(message)
+    return 0 if count >= 0 else 1

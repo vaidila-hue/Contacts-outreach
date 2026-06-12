@@ -115,7 +115,7 @@ def test_sent_date_display_format():
     assert format_sent_date_display("") == ""
 
 
-def test_send_ready_sends_only_ready_unsent(crm_paths):
+def test_send_ready_queues_only_ready_unsent(crm_paths):
     working, _, _ = crm_paths
     write_csv(working, [_working_row()], WORKING_COLUMNS)
     prepare_outreach()
@@ -127,9 +127,9 @@ def test_send_ready_sends_only_ready_unsent(crm_paths):
     args = argparse.Namespace(delay_seconds=0)
     assert run_outreach_send_ready(args, service=service) == 0
     after = read_outreach_rows()
-    assert after[0]["send_status"] == "sent"
-    assert after[0]["approved"] == ""
-    assert after[0]["reply_status"] == "sent_no_reply"
+    assert after[0]["send_status"] == "queued"
+    assert after[0]["approved"] == "yes"
+    assert service.sent == []
 
 
 def test_sent_rows_not_resent(crm_paths):
@@ -208,7 +208,10 @@ def test_ui_renders_simplified_controls(crm_paths):
         assert "Greeting" not in html
         assert "Follow-up</th>" not in html
         assert "Needs Follow-Up" not in html
-        assert "Send Ready Emails" in html
+        assert "Queue Ready Emails" in html
+        assert "Pause Sending" in html
+        assert "Send Next Now" in html
+        assert "Queued:" in html or ">Queued<" in html
         assert "Default Message" in html
         assert "row-menu" in html
         assert "menu-dropdown" in html

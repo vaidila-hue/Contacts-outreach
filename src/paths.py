@@ -17,6 +17,7 @@ LAST_HARVEST_SUMMARY_JSON = DATA_DIR / "last_harvest_summary.json"
 LAST_HARVEST_DIAGNOSTICS_JSON = DATA_DIR / "last_harvest_diagnostics.json"
 LAST_HARVEST_REPORT_MD = DATA_DIR / "last_harvest_report.md"
 HARVEST_RUNNING_LOCK = DATA_DIR / "harvest_running.lock"
+SEND_QUEUE_STATE_JSON = DATA_DIR / "send_queue_state.json"
 DEFAULT_MESSAGE_JSON = DATA_DIR / "default_message.json"
 EXAMPLES_DIR = DATA_DIR / "examples"
 JURISDICTIONS_CSV = DATA_DIR / "jurisdictions_filtered.csv"
@@ -88,6 +89,11 @@ OUTREACH_COLUMNS = [
     "approved_at",
     "drafted_at",
     "error",
+    "queued_at",
+    "last_send_attempt_at",
+    "send_attempt_count",
+    "send_error",
+    "queue_batch_id",
     "greeting_name_modified",
     "contact_name_modified",
     "contact_title_modified",

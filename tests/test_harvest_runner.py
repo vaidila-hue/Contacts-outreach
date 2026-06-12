@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.census_seed import Jurisdiction
+from src.census_seed import Jurisdiction, save_jurisdictions
 from src.harvest_runner import run_find_more_contacts, _drop_covered_working_rows
 from src.harvest_summary import (
     HarvestRunSummary,
@@ -21,6 +21,7 @@ from src.jurisdiction_utils import jurisdiction_match_key, normalize_jurisdictio
 from src.outreach_store import prepare_outreach, read_outreach_rows, write_outreach_rows
 from src.outreach_ui import create_app
 from src.paths import (
+    DATA_DIR,
     DIAGNOSTICS_CSV,
     LAST_HARVEST_SUMMARY_JSON,
     OUTREACH_COLUMNS,
@@ -67,7 +68,7 @@ def harvest_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(er, "WORKING_CSV", working)
     monkeypatch.setattr(er, "REJECTED_CSV", rejected)
     monkeypatch.setattr(er, "DIAGNOSTICS_CSV", diagnostics)
-    return working, outreach, summary, harvest_cfg
+    return working, outreach, summary, harvest_cfg, jurisdictions
 
 
 def _j(state: str, name: str, pop: int = 50000) -> Jurisdiction:
@@ -132,7 +133,7 @@ def test_unsupported_config_states():
 
 
 def test_prepare_reports_duplicate_categories(harvest_paths):
-    working, outreach, _, _ = harvest_paths
+    working, outreach, _, _, _ = harvest_paths
     row = {col: "" for col in OUTREACH_COLUMNS}
     row.update(
         {
@@ -183,7 +184,7 @@ def test_prepare_reports_duplicate_categories(harvest_paths):
 
 
 def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypatch):
-    working, outreach, summary_path, harvest_cfg = harvest_paths
+    working, outreach, summary_path, harvest_cfg, jurisdictions_path = harvest_paths
     existing = {col: "" for col in OUTREACH_COLUMNS}
     existing.update(
         {
@@ -319,6 +320,10 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
     assert saved["candidates_added_count"] == 1
     rows = read_outreach_rows()
     assert len(rows) == 2
+    assert jurisdictions_path.exists()
+    saved_j = jurisdictions_path.read_text(encoding="utf-8")
+    assert "Kissimmee" in saved_j
+    assert "Plano" in saved_j
 
 
 def test_harvest_summary_message_explains_zero_contacts():
@@ -350,7 +355,7 @@ def test_drop_covered_working_rows():
 
 
 def test_stale_covered_working_not_counted_as_duplicate_after_crawl(harvest_paths):
-    working, outreach, _, _ = harvest_paths
+    working, outreach, _, _, _ = harvest_paths
     crm = {col: "" for col in OUTREACH_COLUMNS}
     crm.update(
         {
@@ -406,7 +411,7 @@ def test_stale_covered_working_not_counted_as_duplicate_after_crawl(harvest_path
 
 
 def test_duplicate_after_crawl_counted_for_processed_jurisdiction(harvest_paths):
-    working, outreach, _, _ = harvest_paths
+    working, outreach, _, _, _ = harvest_paths
     crm = {col: "" for col in OUTREACH_COLUMNS}
     crm.update(
         {
@@ -458,7 +463,7 @@ def test_duplicate_after_crawl_counted_for_processed_jurisdiction(harvest_paths)
 
 
 def test_ui_shows_harvest_summary_from_file(harvest_paths):
-    _, _, summary_path, _ = harvest_paths
+    _, _, summary_path, _, _ = harvest_paths
     summary = HarvestRunSummary(
         config_states=["FL"],
         min_population=20000,
@@ -479,3 +484,96 @@ def test_ui_shows_harvest_summary_from_file(harvest_paths):
         assert "Last harvest" in html
         assert "harvest-panel" not in html
         assert "Recommendation" not in html
+
+
+REAL_JURISDICTIONS_CSV = DATA_DIR / "jurisdictions_filtered.csv"
+
+
+def test_save_jurisdictions_respects_patched_paths(harvest_paths):
+    _, _, _, _, jurisdictions_path = harvest_paths
+    save_jurisdictions([_j("FL", "Testville")])
+    assert jurisdictions_path.exists()
+    assert "Testville" in jurisdictions_path.read_text(encoding="utf-8")
+    if REAL_JURISDICTIONS_CSV.exists():
+        real_rows = len(REAL_JURISDICTIONS_CSV.read_text(encoding="utf-8").strip().splitlines()) - 1
+        assert real_rows >= 1000
+
+
+def test_run_find_more_does_not_modify_real_jurisdictions_csv(harvest_paths):
+    """Regression: harvest runner must not overwrite committed jurisdictions CSV."""
+    _, _, _, _, jurisdictions_path = harvest_paths
+    real_before = (
+        REAL_JURISDICTIONS_CSV.read_bytes()
+        if REAL_JURISDICTIONS_CSV.exists()
+        else b""
+    )
+
+    existing = {col: "" for col in OUTREACH_COLUMNS}
+    existing.update(
+        {
+            "state": "FL",
+            "jurisdiction_name": "Miami Beach",
+            "email": "old@city.gov",
+            "contact_name": "Old Contact",
+            "send_status": "prepared",
+        }
+    )
+    write_outreach_rows([existing])
+
+    config = HarvestConfigSettings(
+        states=["FL", "TX"],
+        min_population=20000,
+        max_population=100000,
+        limit=2,
+        include_counties=False,
+        deep_mode=False,
+    )
+    from src.harvest_config_store import save_harvest_config
+
+    save_harvest_config(config)
+
+    seeded = [
+        _j("FL", "Miami Beach"),
+        _j("FL", "Kissimmee"),
+        _j("TX", "Austin"),
+        _j("TX", "Plano"),
+    ]
+
+    def fake_harvest(j, fetcher, overrides, stats=None, config=None, domain_cache=None):
+        return None, None, {
+            "state": j.state,
+            "jurisdiction_name": j.jurisdiction_name,
+            "geography_type": "city",
+            "population": str(j.population),
+            "official_domain": "",
+            "planning_pages_found": "0",
+            "directory_pages_found": "0",
+            "staff_links_found": "0",
+            "profile_links_followed": "0",
+            "mailto_links_found": "0",
+            "emails_found": "0",
+            "candidate_titles_found": "0",
+            "pages_fetched": "0",
+            "search_queries_run": "0",
+            "found_contact": "no",
+            "final_rejection_reason": "no_official_site_found",
+            "elapsed_seconds": "1",
+            "cache_hits": "0",
+            "cache_misses": "0",
+            "profile_pages_followed": "0",
+            "early_stop": "no",
+            "max_page_limit_hit": "no",
+            "timeout_count": "0",
+            "fetch_error_count": "0",
+        }
+
+    with patch("src.harvest_runner.seed_jurisdictions", return_value=(seeded, None)):
+        with patch("src.harvest_runner.harvest_jurisdiction", side_effect=fake_harvest):
+            with patch("src.harvest_runner.PageFetcher") as mock_fetcher:
+                mock_fetcher.return_value.__enter__.return_value = object()
+                run_find_more_contacts()
+
+    if real_before:
+        assert REAL_JURISDICTIONS_CSV.read_bytes() == real_before
+    assert jurisdictions_path.exists()
+    assert "Kissimmee" in jurisdictions_path.read_text(encoding="utf-8")

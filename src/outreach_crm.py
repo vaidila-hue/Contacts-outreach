@@ -15,6 +15,8 @@ from src.paths import (
 SENT_STATUS = "sent"
 DRAFTED_STATUS = "drafted"
 PREPARED_STATUS = "prepared"
+QUEUED_STATUS = "queued"
+SENDING_STATUS = "sending"
 
 OUTREACH_STATE_FIELDS = (
     "approved",
@@ -57,6 +59,7 @@ REPLY_COUNTS_AS_REPLY = frozenset(
 FILTER_OPTIONS = (
     ("all", "Show All"),
     ("ready", "Ready"),
+    ("queued", "Queued"),
     ("not_sent", "Not Sent"),
     ("sent", "Sent"),
     ("replied", "Replied"),
@@ -71,7 +74,10 @@ def _now_iso() -> str:
 
 def is_ready(row: dict[str, str]) -> bool:
     approved = (row.get("approved") or "").lower() in ("yes", "true", "1")
-    return approved and row.get("send_status") != SENT_STATUS
+    status = row.get("send_status") or ""
+    if status in (SENT_STATUS, QUEUED_STATUS, SENDING_STATUS):
+        return False
+    return approved
 
 
 def format_sent_date_display(sent_at: str) -> str:
@@ -251,6 +257,8 @@ def row_matches_filter(row: dict[str, str], filter_name: str) -> bool:
     reply = row.get("reply_status", "")
     if filter_name == "ready":
         return is_ready(row)
+    if filter_name == "queued":
+        return (row.get("send_status") or "") == QUEUED_STATUS
     if filter_name == "approved":
         return is_ready(row)
     if filter_name == "not_sent":
