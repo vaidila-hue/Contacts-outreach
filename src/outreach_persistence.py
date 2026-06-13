@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from src import paths
+from src.crm_path_guard import assert_crm_write_path_allowed
 from src.paths import OUTREACH_COLUMNS
 
 
@@ -46,9 +47,11 @@ def backup_outreach_csv(outreach_path: Path | None = None) -> Path | None:
     if not outreach_file_has_rows(path):
         return None
     backup_dir = _backup_dir()
+    assert_crm_write_path_allowed(backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = backup_dir / f"outreach_{stamp}.csv"
+    assert_crm_write_path_allowed(dest)
     shutil.copy2(path, dest)
     prune_outreach_backups()
     return dest
@@ -66,6 +69,7 @@ def prune_outreach_backups(*, max_keep: int = MAX_OUTREACH_BACKUPS) -> int:
     )
     removed = 0
     for old in backups[max_keep:]:
+        assert_crm_write_path_allowed(old)
         old.unlink(missing_ok=True)
         removed += 1
     return removed
@@ -113,9 +117,11 @@ def write_outreach_csv_atomic(
     """Backup existing outreach.csv, then replace it atomically via a temp file."""
     columns = columns or OUTREACH_COLUMNS
     target = outreach_path or _outreach_csv()
+    assert_crm_write_path_allowed(target)
     backup_outreach_csv(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = target.with_name(target.name + ".tmp")
+    assert_crm_write_path_allowed(tmp_path)
     try:
         with tmp_path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")

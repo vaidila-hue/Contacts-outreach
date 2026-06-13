@@ -13,6 +13,10 @@ WORKING_CSV = DATA_DIR / "prospects_working.csv"
 REJECTED_CSV = DATA_DIR / "prospects_rejected.csv"
 OUTREACH_CSV = DATA_DIR / "outreach.csv"
 OUTREACH_BACKUP_DIR = DATA_DIR / "backups" / "outreach"
+
+# Immutable production paths for test guardrails (never monkeypatch these).
+PRODUCTION_OUTREACH_CSV = OUTREACH_CSV
+PRODUCTION_OUTREACH_BACKUP_DIR = OUTREACH_BACKUP_DIR
 HARVEST_CONFIG_JSON = DATA_DIR / "harvest_config.json"
 LAST_HARVEST_SUMMARY_JSON = DATA_DIR / "last_harvest_summary.json"
 LAST_HARVEST_DIAGNOSTICS_JSON = DATA_DIR / "last_harvest_diagnostics.json"
