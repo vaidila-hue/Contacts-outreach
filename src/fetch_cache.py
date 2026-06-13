@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.paths import FETCH_CACHE_DIR
+
+_log = logging.getLogger("contacts.fetch_cache")
 
 
 @dataclass
@@ -29,7 +32,7 @@ def get_cached_fetch(normalized_url: str, ttl_days: int) -> CachedFetch | None:
     if not normalized_url:
         return None
     path = _cache_path(normalized_url)
-    if not path.exists():
+    if not path.is_file():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -57,13 +60,21 @@ def put_cached_fetch(
 ) -> None:
     if not normalized_url:
         return
-    FETCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "normalized_url": normalized_url,
-        "status_code": status_code,
-        "final_url": final_url,
-        "content_type": content_type,
-        "html": html,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _cache_path(normalized_url).write_text(json.dumps(payload), encoding="utf-8")
+    try:
+        FETCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "normalized_url": normalized_url,
+            "status_code": status_code,
+            "final_url": final_url,
+            "content_type": content_type,
+            "html": html,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _cache_path(normalized_url).write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:
+        _log.warning(
+            "Fetch cache write failed for %s (%s): %s",
+            normalized_url,
+            _cache_path(normalized_url),
+            exc,
+        )

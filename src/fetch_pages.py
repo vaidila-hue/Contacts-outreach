@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -20,6 +22,8 @@ from src.url_utils import normalize_url
 _robots_cache: dict[str, RobotFileParser | None] = {}
 
 RETRYABLE_HTTP_STATUS = frozenset({429, 502, 503, 504})
+_log = logging.getLogger("contacts.fetch_pages")
+_CACHE_KEY_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 @dataclass
@@ -52,6 +56,77 @@ class _FetchProfileSettings:
 
 def _cache_key(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:16]
+
+
+def _safe_cache_stem(normalized_url: str) -> str:
+    key = _cache_key(normalized_url)
+    if _CACHE_KEY_RE.fullmatch(key):
+        return key
+    return hashlib.sha256(normalized_url.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _legacy_html_cache_path(normalized_url: str) -> Path:
+    return HTML_CACHE / f"{_safe_cache_stem(normalized_url)}.html"
+
+
+def _pdf_cache_path(normalized_url: str) -> Path:
+    return PDF_CACHE / f"{_safe_cache_stem(normalized_url)}.pdf"
+
+
+def _read_legacy_html_cache(cache_path: Path, url: str) -> str | None:
+    try:
+        if not cache_path.is_file():
+            return None
+        return cache_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        _log.warning(
+            "Skipping unreadable HTML cache for %s (%s): %s",
+            url,
+            cache_path,
+            exc,
+        )
+        return None
+
+
+def _write_legacy_html_cache(cache_path: Path, url: str, text: str) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        _log.warning(
+            "HTML cache write failed for %s (%s): %s",
+            url,
+            cache_path,
+            exc,
+        )
+
+
+def _read_pdf_cache(cache_path: Path, url: str) -> bytes | None:
+    try:
+        if not cache_path.is_file():
+            return None
+        return cache_path.read_bytes()
+    except OSError as exc:
+        _log.warning(
+            "Skipping unreadable PDF cache for %s (%s): %s",
+            url,
+            cache_path,
+            exc,
+        )
+        return None
+
+
+def _write_pdf_cache(cache_path: Path, url: str, data: bytes) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(data)
+    except OSError as exc:
+        _log.warning(
+            "PDF cache write failed for %s (%s): %s",
+            url,
+            cache_path,
+            exc,
+        )
 
 
 def _get_robots(base_url: str) -> RobotFileParser | None:
@@ -253,12 +328,13 @@ class PageFetcher:
                 self._run_fetched[cache_key] = cached.html
                 return cached.html
 
-        legacy_path = HTML_CACHE / f"{_cache_key(normalized)}.html"
-        if legacy_path.exists() and not self.force_refresh:
-            text = legacy_path.read_text(encoding="utf-8", errors="replace")
-            self._jstats.cache_hits += 1
-            self._run_fetched[cache_key] = text
-            return text
+        legacy_path = _legacy_html_cache_path(normalized)
+        if not self.force_refresh:
+            cached_text = _read_legacy_html_cache(legacy_path, normalized)
+            if cached_text is not None:
+                self._jstats.cache_hits += 1
+                self._run_fetched[cache_key] = cached_text
+                return cached_text
 
         settings = self._profile_settings(profile)
         timeout = httpx.Timeout(
@@ -322,8 +398,7 @@ class PageFetcher:
 
         if text:
             self._run_fetched[cache_key] = text
-            HTML_CACHE.mkdir(parents=True, exist_ok=True)
-            legacy_path.write_text(text, encoding="utf-8")
+            _write_legacy_html_cache(legacy_path, normalized, text)
             if self.use_fetch_cache:
                 put_cached_fetch(
                     normalized,
@@ -349,9 +424,11 @@ class PageFetcher:
         normalized = normalize_url(url)
         if not normalized or not allowed_by_robots(normalized):
             return None
-        cache_path = PDF_CACHE / f"{_cache_key(normalized)}.pdf"
-        if cache_path.exists() and not self.force_refresh:
-            return cache_path.read_bytes()
+        cache_path = _pdf_cache_path(normalized)
+        if not self.force_refresh:
+            cached_pdf = _read_pdf_cache(cache_path, normalized)
+            if cached_pdf is not None:
+                return cached_pdf
         self._wait()
         try:
             resp = self.client.get(normalized)
@@ -362,8 +439,7 @@ class PageFetcher:
             ct = resp.headers.get("content-type", "")
             if "pdf" not in ct and not normalized.lower().endswith(".pdf"):
                 return None
-            PDF_CACHE.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(resp.content)
+            _write_pdf_cache(cache_path, normalized, resp.content)
             return resp.content
         except httpx.HTTPError:
             self._jstats.fetch_error_count += 1
