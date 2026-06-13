@@ -23,8 +23,8 @@ data/send_queue_state.json
 data/send_queue_config.json
 data/build_log.txt
 
-# Harvest config (optional)
-# data/harvest_config.json
+# Harvest config (local runtime; copy from harvest_config.example.json if needed)
+data/harvest_config.json
 
 # Local caches
 data/cache/

@@ -1,0 +1,22 @@
+{
+  "states": [
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "MI",
+    "MT",
+    "OR",
+    "PA",
+    "RI",
+    "VT",
+    "VA",
+    "WA",
+    "WI"
+  ],
+  "min_population": 20000,
+  "max_population": 100000,
+  "limit": 50,
+  "include_counties": false,
+  "deep_mode": false
+}
