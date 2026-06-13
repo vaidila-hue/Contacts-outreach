@@ -158,3 +158,30 @@ def run_outreach_send_ready(args: argparse.Namespace, service: GmailService | No
     result = queue_ready_contacts()
     print(result.format_message())
     return 0
+
+
+def run_outreach_list_backups() -> int:
+    from src.outreach_persistence import list_outreach_backups
+
+    backups = list_outreach_backups()
+    if not backups:
+        print("No outreach backups found.")
+        return 0
+    print(f"Outreach backups ({len(backups)} newest first):")
+    for path in backups:
+        mtime = path.stat().st_mtime
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+        print(f"  {path.name}  ({path.stat().st_size} bytes, {when})")
+    return 0
+
+
+def run_outreach_restore_backup(filename: str) -> int:
+    from src.outreach_persistence import restore_outreach_backup
+
+    try:
+        backup = restore_outreach_backup(filename)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    print(f"Restored outreach.csv from {backup.name}")
+    return 0
