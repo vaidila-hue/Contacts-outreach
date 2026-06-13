@@ -10,6 +10,7 @@ token.json
 
 # Outreach data
 data/outreach.csv
+data/backups/
 data/prospects_working.csv
 data/prospects_rejected.csv
 data/harvest_diagnostics.csv

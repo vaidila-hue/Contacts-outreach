@@ -976,13 +976,27 @@ def run_outreach(args: argparse.Namespace) -> int:
     if args.open:
         return run_outreach_open()
 
+    if getattr(args, "list_backups", False):
+        from src.outreach_cli import run_outreach_list_backups
+
+        return run_outreach_list_backups()
+
+    restore_name = getattr(args, "restore_backup", None)
+    if restore_name:
+        from src.outreach_cli import run_outreach_restore_backup
+
+        return run_outreach_restore_backup(restore_name)
+
     actions = sum(
         1
         for flag in (args.prepare, args.serve, args.draft, args.send)
         if flag
     )
     if actions != 1:
-        print("Specify exactly one of: --prepare, --serve, --draft, --send (or use --open)")
+        print(
+            "Specify exactly one of: --prepare, --serve, --draft, --send, "
+            "--list-backups, --restore-backup (or use --open)"
+        )
         return 1
     if args.prepare:
         return run_outreach_prepare()
@@ -1151,6 +1165,17 @@ def main() -> None:
     )
     parser.add_argument("--force", action="store_true", help="Outreach: allow forced resend (requires --confirm-force)")
     parser.add_argument("--confirm-force", action="store_true", help="Outreach: confirm --force")
+    parser.add_argument(
+        "--list-backups",
+        action="store_true",
+        help="Outreach: list timestamped outreach.csv backups",
+    )
+    parser.add_argument(
+        "--restore-backup",
+        metavar="FILENAME",
+        default="",
+        help="Outreach: restore outreach.csv from data/backups/outreach/FILENAME",
+    )
     args = parser.parse_args()
 
     if args.command == "build":

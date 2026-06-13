@@ -50,7 +50,9 @@ def export_outreach(working_rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def write_outreach_csv(rows: list[dict[str, str]]) -> None:
-    write_csv(OUTREACH_CSV, rows, OUTREACH_COLUMNS)
+    from src.outreach_store import write_outreach_rows
+
+    write_outreach_rows(rows)
 
 
 def write_working_csv(rows: list[dict[str, str]]) -> None:
@@ -76,7 +78,9 @@ def clear_output_csvs(*, clear_outreach: bool = False) -> None:
     write_csv(REJECTED_CSV, [], REJECTED_COLUMNS)
     write_csv(DIAGNOSTICS_CSV, [], DIAGNOSTICS_COLUMNS)
     if clear_outreach:
-        write_csv(OUTREACH_CSV, [], OUTREACH_COLUMNS)
+        from src.outreach_store import write_outreach_rows
+
+        write_outreach_rows([])
     write_review_html([])
 
 

@@ -32,10 +32,13 @@ from src.paths import (
     DIAGNOSTICS_CSV,
     DIAGNOSTICS_COLUMNS,
     OUTREACH_COLUMNS,
-    OUTREACH_CSV,
     WORKING_COLUMNS,
     WORKING_CSV,
 )
+from src import paths
+
+# Re-export for tests that monkeypatch outreach_store.OUTREACH_CSV.
+OUTREACH_CSV = paths.OUTREACH_CSV
 
 DRAFTED_STATUS = "drafted"
 
@@ -45,7 +48,9 @@ def empty_outreach_row() -> dict[str, str]:
 
 
 def read_outreach_rows() -> list[dict[str, str]]:
-    rows = read_csv(OUTREACH_CSV, OUTREACH_COLUMNS)
+    from src import paths
+
+    rows = read_csv(paths.OUTREACH_CSV, OUTREACH_COLUMNS)
     for row in rows:
         if not row.get("reply_status"):
             row["reply_status"] = "not_sent"
@@ -53,7 +58,9 @@ def read_outreach_rows() -> list[dict[str, str]]:
 
 
 def write_outreach_rows(rows: list[dict[str, str]]) -> None:
-    write_csv(OUTREACH_CSV, rows, OUTREACH_COLUMNS)
+    from src.outreach_persistence import write_outreach_csv_atomic
+
+    write_outreach_csv_atomic(rows)
 
 
 def _now_iso() -> str:
