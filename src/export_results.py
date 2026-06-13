@@ -67,12 +67,16 @@ def write_diagnostics_csv(rows: list[dict[str, str]]) -> None:
     write_csv(DIAGNOSTICS_CSV, rows, DIAGNOSTICS_COLUMNS)
 
 
-def clear_output_csvs() -> None:
-    """Reset working, rejected, outreach, and diagnostics CSVs to empty (headers only)."""
+def clear_output_csvs(*, clear_outreach: bool = False) -> None:
+    """Reset working, rejected, and diagnostics CSVs to empty (headers only).
+
+    Outreach (CRM system of record) is preserved unless clear_outreach=True.
+    """
     write_csv(WORKING_CSV, [], WORKING_COLUMNS)
     write_csv(REJECTED_CSV, [], REJECTED_COLUMNS)
-    write_csv(OUTREACH_CSV, [], OUTREACH_COLUMNS)
     write_csv(DIAGNOSTICS_CSV, [], DIAGNOSTICS_COLUMNS)
+    if clear_outreach:
+        write_csv(OUTREACH_CSV, [], OUTREACH_COLUMNS)
     write_review_html([])
 
 

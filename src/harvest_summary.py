@@ -76,6 +76,8 @@ class HarvestRunSummary:
     top_failures: list[dict[str, str]] = field(default_factory=list)
     recommendation_code: str = ""
     recommendation: str = ""
+    run_source: str = ""
+    diagnostics_row_count: int = 0
 
     def config_line(self) -> str:
         states = ",".join(self.config_states)
@@ -218,6 +220,18 @@ def partition_jurisdictions(
 
 def unsupported_config_states(states: list[str]) -> list[str]:
     return sorted({s.upper() for s in states if s.upper() not in STATE_FIPS})
+
+
+def top_rejection_reasons_from_diagnostics(
+    diagnostics_rows: list[dict[str, str]],
+) -> list[dict[str, str | int]]:
+    from collections import Counter
+
+    counts = Counter(
+        (row.get("final_rejection_reason") or "").strip() or "(found contact)"
+        for row in diagnostics_rows
+    )
+    return [{"reason": reason, "count": count} for reason, count in counts.most_common()]
 
 
 def save_harvest_summary(summary: HarvestRunSummary) -> None:

@@ -6,6 +6,7 @@ from src.harvest_report import (
     analyze_harvest_run,
     discovery_implementation_label,
     format_harvest_dashboard,
+    harvest_dashboard_stale_note,
     render_harvest_report_md,
 )
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -13,6 +14,38 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 def test_discovery_implementation_label_is_site_discovery():
     assert discovery_implementation_label() == "site_discovery_v1"
+
+
+def test_harvest_dashboard_stale_note_when_diagnostics_newer(tmp_path, monkeypatch):
+    import src.harvest_report as hr
+    import src.paths as paths
+
+    diagnostics = tmp_path / "harvest_diagnostics.csv"
+    monkeypatch.setattr(paths, "DIAGNOSTICS_CSV", diagnostics)
+    monkeypatch.setattr(hr, "DIAGNOSTICS_CSV", diagnostics)
+
+    from src.csv_utils import write_csv
+    from src.paths import DIAGNOSTICS_COLUMNS
+
+    write_csv(
+        diagnostics,
+        [{"final_rejection_reason": "no_official_site_found"} for _ in range(73)],
+        DIAGNOSTICS_COLUMNS,
+    )
+
+    summary = HarvestRunSummary(
+        run_completed_at="2026-06-11T23:17:42+00:00",
+        jurisdictions_processed_count=60,
+        candidates_added_count=2,
+        diagnostics_row_count=60,
+        run_source="cli_build",
+    )
+    note = harvest_dashboard_stale_note(summary)
+    assert "older run" in note
+    assert "73" in note
+
+    dash = format_harvest_dashboard(summary, stale_note=note)
+    assert dash["stale_note"] == note
 
 
 def test_analyze_last_run_rejection_breakdown():

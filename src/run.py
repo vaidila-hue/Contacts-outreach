@@ -44,6 +44,15 @@ from src.export_results import (
     write_rejected_csv,
     write_working_csv,
 )
+from src.harvest_report import analyze_harvest_run, enrich_summary, save_harvest_report
+from src.harvest_summary import (
+    HarvestRunSummary,
+    jurisdiction_record,
+    now_iso,
+    save_harvest_summary,
+    top_rejection_reasons_from_diagnostics,
+    unsupported_config_states,
+)
 from src.extract_contacts import (
     ContactCandidate,
     extract_contacts_from_html,
@@ -57,6 +66,7 @@ from src.jurisdiction_utils import filter_urls_for_jurisdiction, official_homepa
 from src.prospect_priority import compute_prospect_priority
 from src.fetch_pages import PageFetcher, find_pdf_links
 from src.manual_urls import ManualUrlEntry, load_manual_urls, manual_urls_for_jurisdiction
+from src.outreach_store import read_outreach_rows
 from src.outreach_cli import run_outreach_draft, run_outreach_prepare, run_outreach_send
 from src.outreach_launch import (
     CRM_URL,
@@ -712,11 +722,19 @@ def run_build(args: argparse.Namespace) -> None:
 
     mode = BuildMode.from_args(args)
     delay = resolve_delay(args)
+    run_started_at = now_iso()
     started = time.monotonic()
 
+    if getattr(args, "clear_outreach", False):
+        write_outreach_csv([])
+        print("Cleared outreach.csv (--clear-outreach).")
+
     if args.clear_outputs:
-        clear_output_csvs()
-        print("Cleared prospects_working.csv, prospects_rejected.csv, outreach.csv, and harvest_diagnostics.csv.")
+        clear_output_csvs(clear_outreach=getattr(args, "clear_outreach", False))
+        cleared = "prospects_working.csv, prospects_rejected.csv, and harvest_diagnostics.csv"
+        if getattr(args, "clear_outreach", False):
+            cleared += ", outreach.csv"
+        print(f"Cleared {cleared}.")
 
     states = _parse_states(args.states)
     existing_working = read_csv(WORKING_CSV, WORKING_COLUMNS)
@@ -741,6 +759,10 @@ def run_build(args: argparse.Namespace) -> None:
     pending = [
         j for j in jurisdictions
         if j.key() not in done_keys or args.force_refresh
+    ]
+    skipped = [
+        j for j in jurisdictions
+        if j.key() in done_keys and not args.force_refresh
     ]
     if args.limit:
         pending = pending[: args.limit]
@@ -799,9 +821,45 @@ def run_build(args: argparse.Namespace) -> None:
 
     write_working_csv(working_rows)
     write_rejected_csv(rejected_rows)
-    write_outreach_csv([])
     if diagnostics_rows:
         write_diagnostics_csv(diagnostics_rows)
+
+    pending_keys = {(j.state, j.jurisdiction_name, j.geography_type) for j in pending}
+    rejected_added = sum(
+        1
+        for row in rejected_rows
+        if (row["state"], row["jurisdiction_name"], row["geography_type"]) in pending_keys
+    )
+    unsupported = unsupported_config_states(states)
+    summary = HarvestRunSummary(
+        run_started_at=run_started_at,
+        run_completed_at=now_iso(),
+        config_states=states,
+        min_population=args.min_pop,
+        max_population=args.max_pop,
+        limit=args.limit,
+        include_counties=include_counties,
+        deep_mode=mode.deep,
+        unsupported_states=unsupported,
+        jurisdictions_seeded_count=len(jurisdictions),
+        jurisdictions_considered_count=len(jurisdictions),
+        jurisdictions_skipped_existing_count=len(skipped),
+        jurisdictions_available_after_skip_count=len(jurisdictions) - len(skipped),
+        jurisdictions_processed_count=processed,
+        candidates_found_count=stats.candidates_found,
+        candidates_added_count=found,
+        rejected_count=rejected_added,
+        total_outreach_contacts_after=len(read_outreach_rows()),
+        processed_jurisdictions=[jurisdiction_record(j) for j in pending],
+        skipped_existing_jurisdictions=[jurisdiction_record(j) for j in skipped],
+        top_rejection_reasons=top_rejection_reasons_from_diagnostics(diagnostics_rows),
+        run_source="cli_build",
+        diagnostics_row_count=len(diagnostics_rows),
+    )
+    analysis = analyze_harvest_run(summary, diagnostics_rows=diagnostics_rows)
+    enrich_summary(summary, analysis)
+    save_harvest_summary(summary)
+    save_harvest_report(summary, analysis, diagnostics_rows=diagnostics_rows)
 
     stats.elapsed_seconds = time.monotonic() - started
     avg = stats.elapsed_seconds / max(stats.jurisdictions_processed, 1)
@@ -1010,7 +1068,12 @@ def main() -> None:
     parser.add_argument(
         "--clear-outputs",
         action="store_true",
-        help="Clear working/rejected/outreach CSVs before build (does not clear cache)",
+        help="Clear working/rejected/diagnostics CSVs before build (does not clear outreach.csv)",
+    )
+    parser.add_argument(
+        "--clear-outreach",
+        action="store_true",
+        help="Clear outreach.csv (CRM). Use with --clear-outputs for a full reset.",
     )
     parser.add_argument(
         "--max-pages-per-jurisdiction",

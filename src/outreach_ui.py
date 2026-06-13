@@ -217,6 +217,9 @@ PAGE_TEMPLATE = """
     <div class="metric metric-compact"><span>Processed</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.jurisdictions_processed }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>New contacts</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.new_contacts }}{% else %}—{% endif %}</strong></div>
     <div class="metric metric-compact"><span>No-contact</span><strong>{% if harvest_running %}—{% elif harvest_dashboard %}{{ harvest_dashboard.no_contact_jurisdictions }}{% else %}—{% endif %}</strong></div>
+    {% if harvest_dashboard and harvest_dashboard.stale_note %}
+    <p class="harvest-stale-note" role="status">{{ harvest_dashboard.stale_note }}</p>
+    {% endif %}
   </div>
 
   <div class="filters">
@@ -633,7 +636,11 @@ def create_app(*, start_worker: bool = False) -> Flask:
         harvest_summary = None
         harvest_dashboard = None
         from src.harvest_summary import load_harvest_summary
-        from src.harvest_report import build_report_from_summary_file, format_harvest_dashboard
+        from src.harvest_report import (
+            build_report_from_summary_file,
+            format_harvest_dashboard,
+            harvest_dashboard_stale_note,
+        )
         from src.harvest_status import is_harvest_running
 
         harvest_running = is_harvest_running()
@@ -642,7 +649,10 @@ def create_app(*, start_worker: bool = False) -> Flask:
             if not harvest_summary.discovery_implementation:
                 build_report_from_summary_file()
                 harvest_summary = load_harvest_summary()
-            harvest_dashboard = format_harvest_dashboard(harvest_summary)
+            harvest_dashboard = format_harvest_dashboard(
+                harvest_summary,
+                stale_note=harvest_dashboard_stale_note(harvest_summary),
+            )
         if request.args.get("harvest") == "1" and harvest_summary:
             message = harvest_summary.format_message()
         harvest_config = load_harvest_config()

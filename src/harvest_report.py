@@ -344,7 +344,11 @@ def _fmt_ts(iso: str) -> str:
         return iso
 
 
-def format_harvest_dashboard(summary: HarvestRunSummary) -> dict[str, str]:
+def format_harvest_dashboard(
+    summary: HarvestRunSummary,
+    *,
+    stale_note: str = "",
+) -> dict[str, str]:
     """Short labels for CRM dashboard panel."""
     no_contact = summary.no_official_site_count + summary.no_planning_contact_count
     if not no_contact and summary.top_rejection_reasons:
@@ -353,12 +357,54 @@ def format_harvest_dashboard(summary: HarvestRunSummary) -> dict[str, str]:
             for item in summary.top_rejection_reasons
             if item.get("reason") in ("no_official_site_found", "no_planning_contact_found")
         )
-    return {
+    result = {
         "last_run": _fmt_ts_et(summary.run_completed_at or summary.run_started_at),
         "jurisdictions_processed": str(summary.jurisdictions_processed_count),
         "new_contacts": str(summary.candidates_added_count),
         "no_contact_jurisdictions": str(no_contact or summary.rejected_count),
+        "stale_note": stale_note,
+        "run_source": summary.run_source or "",
     }
+    return result
+
+
+def harvest_dashboard_stale_note(summary: HarvestRunSummary | None) -> str:
+    """Return a user-visible note when saved summary lags newer diagnostics on disk."""
+    if summary is None:
+        return ""
+    if not DIAGNOSTICS_CSV.exists():
+        return ""
+
+    diag_rows = _read_csv(DIAGNOSTICS_CSV)
+    diag_count = len(diag_rows)
+    if diag_count == 0:
+        return ""
+
+    saved_count = summary.diagnostics_row_count or summary.jurisdictions_processed_count
+    count_mismatch = saved_count > 0 and diag_count != saved_count
+
+    newer_diagnostics = False
+    if summary.run_completed_at:
+        try:
+            summary_dt = datetime.fromisoformat(summary.run_completed_at.replace("Z", "+00:00"))
+            diag_mtime = datetime.fromtimestamp(DIAGNOSTICS_CSV.stat().st_mtime, tz=timezone.utc)
+            newer_diagnostics = diag_mtime > summary_dt
+        except (OSError, ValueError):
+            newer_diagnostics = False
+
+    if not count_mismatch and not newer_diagnostics:
+        return ""
+
+    parts = [
+        "Harvest stats may be from an older run.",
+        f"Saved summary: {saved_count} jurisdictions processed.",
+        f"Current diagnostics file: {diag_count} rows.",
+    ]
+    if summary.run_source == "export_only":
+        parts.append("Contacts were rebuilt from working prospects (--export-only); run a full harvest to refresh stats.")
+    elif count_mismatch:
+        parts.append("Re-run harvest or refresh the summary to align dashboard numbers.")
+    return " ".join(parts)
 
 
 def render_harvest_report_md(summary: HarvestRunSummary, analysis: RunAnalysis) -> str:

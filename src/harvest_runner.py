@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 
 from src.build_mode import BuildMode, BuildStats, resolve_delay
-from src.census_seed import seed_jurisdictions, save_jurisdictions
+from src.census_seed import save_jurisdictions, seed_jurisdictions
 from src.directory_harvest import harvest_jurisdiction, sort_jurisdictions_for_harvest
 from src.domain_cache import load_domain_cache
 from src.export_results import merge_working_row, write_diagnostics_csv, write_rejected_csv, write_working_csv
@@ -21,6 +20,7 @@ from src.harvest_summary import (
     now_iso,
     partition_jurisdictions,
     save_harvest_summary,
+    top_rejection_reasons_from_diagnostics,
     unsupported_config_states,
 )
 from src.jurisdiction_utils import jurisdiction_match_key
@@ -55,11 +55,7 @@ def _args_from_config(config: HarvestConfigSettings) -> argparse.Namespace:
 
 
 def _top_rejection_reasons(diagnostics_rows: list[dict[str, str]]) -> list[dict[str, str | int]]:
-    counts = Counter(
-        (row.get("final_rejection_reason") or "").strip() or "(found contact)"
-        for row in diagnostics_rows
-    )
-    return [{"reason": reason, "count": count} for reason, count in counts.most_common()]
+    return top_rejection_reasons_from_diagnostics(diagnostics_rows)
 
 
 def _drop_covered_working_rows(
@@ -195,6 +191,8 @@ def _run_find_more_contacts_impl() -> HarvestRunSummary:
         processed_jurisdictions=[jurisdiction_record(j) for j in pending],
         skipped_existing_jurisdictions=[jurisdiction_record(j) for j in skipped],
         top_rejection_reasons=_top_rejection_reasons(diagnostics_rows),
+        run_source="crm_harvest",
+        diagnostics_row_count=len(diagnostics_rows),
     )
     analysis = analyze_harvest_run(summary, diagnostics_rows=diagnostics_rows)
     enrich_summary(summary, analysis)

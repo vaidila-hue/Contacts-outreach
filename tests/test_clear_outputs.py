@@ -61,11 +61,17 @@ def tmp_outputs(tmp_path, monkeypatch):
     return working, rejected, outreach
 
 
-def test_clear_output_csvs_empties_files(tmp_outputs):
+def test_clear_output_csvs_preserves_outreach_by_default(tmp_outputs):
     working, rejected, outreach = tmp_outputs
     clear_output_csvs()
     assert list(csv.DictReader(working.open(encoding="utf-8"))) == []
     assert list(csv.DictReader(rejected.open(encoding="utf-8"))) == []
+    assert len(list(csv.DictReader(outreach.open(encoding="utf-8")))) == 1
+
+
+def test_clear_output_csvs_clears_outreach_when_flagged(tmp_outputs):
+    working, rejected, outreach = tmp_outputs
+    clear_output_csvs(clear_outreach=True)
     assert list(csv.DictReader(outreach.open(encoding="utf-8"))) == []
 
 
