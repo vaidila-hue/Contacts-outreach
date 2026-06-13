@@ -1,0 +1,829 @@
+{
+  "run_started_at": "2026-06-12T00:54:50+00:00",
+  "run_completed_at": "2026-06-12T01:17:04+00:00",
+  "config_states": [
+    "CA",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "MI",
+    "MN",
+    "MO",
+    "NV",
+    "NM",
+    "OR",
+    "RI",
+    "TX",
+    "VT"
+  ],
+  "min_population": 20000,
+  "max_population": 90000,
+  "limit": 60,
+  "include_counties": true,
+  "deep_mode": false,
+  "unsupported_states": [],
+  "jurisdictions_seeded_count": 1126,
+  "jurisdictions_considered_count": 1126,
+  "jurisdictions_skipped_existing_count": 31,
+  "jurisdictions_available_after_skip_count": 1093,
+  "jurisdictions_processed_count": 60,
+  "candidates_found_count": 2,
+  "candidates_added_count": 2,
+  "duplicates_skipped_count": 0,
+  "duplicate_after_crawl_count": 0,
+  "duplicate_email": 0,
+  "duplicate_contact_jurisdiction": 0,
+  "duplicate_source_name": 0,
+  "duplicate_email_jurisdiction": 0,
+  "generic_skipped": 0,
+  "rejected_count": 58,
+  "total_outreach_contacts_after": 49,
+  "processed_jurisdictions": [
+    {
+      "state": "CA",
+      "jurisdiction_name": "Merced",
+      "geography_type": "city",
+      "population": "89766"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Bloomington",
+      "geography_type": "city",
+      "population": "88838"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "San Leandro",
+      "geography_type": "city",
+      "population": "88531"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Santa Barbara",
+      "geography_type": "city",
+      "population": "88024"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Troy",
+      "geography_type": "city",
+      "population": "87307"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Duluth",
+      "geography_type": "city",
+      "population": "86863"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Deerfield Beach",
+      "geography_type": "city",
+      "population": "86742"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Manteca",
+      "geography_type": "city",
+      "population": "86521"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Mission",
+      "geography_type": "city",
+      "population": "86234"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Hawthorne",
+      "geography_type": "city",
+      "population": "85933"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Whittier",
+      "geography_type": "city",
+      "population": "85925"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Livermore",
+      "geography_type": "city",
+      "population": "85870"
+    },
+    {
+      "state": "OR",
+      "jurisdiction_name": "Medford",
+      "geography_type": "city",
+      "population": "85794"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "San Ramon",
+      "geography_type": "city",
+      "population": "85734"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Melbourne",
+      "geography_type": "city",
+      "population": "85718"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Baytown",
+      "geography_type": "city",
+      "population": "84538"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Brooklyn Park",
+      "geography_type": "city",
+      "population": "84349"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Newport Beach",
+      "geography_type": "city",
+      "population": "84304"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Westland",
+      "geography_type": "city",
+      "population": "84155"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Farmington Hills",
+      "geography_type": "city",
+      "population": "83316"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Buena Park",
+      "geography_type": "city",
+      "population": "83052"
+    },
+    {
+      "state": "RI",
+      "jurisdiction_name": "Warwick",
+      "geography_type": "city",
+      "population": "82871"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Longview",
+      "geography_type": "city",
+      "population": "82765"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Largo",
+      "geography_type": "city",
+      "population": "82506"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Redwood City",
+      "geography_type": "city",
+      "population": "82423"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Mountain View",
+      "geography_type": "city",
+      "population": "82363"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Folsom",
+      "geography_type": "city",
+      "population": "82140"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Warner Robins",
+      "geography_type": "city",
+      "population": "81438"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Flint",
+      "geography_type": "city",
+      "population": "80835"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Homestead",
+      "geography_type": "city",
+      "population": "80725"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Rancho Cordova",
+      "geography_type": "city",
+      "population": "80656"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Boynton Beach",
+      "geography_type": "city",
+      "population": "80601"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "North Port",
+      "geography_type": "city",
+      "population": "80512"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Lakewood",
+      "geography_type": "city",
+      "population": "80510"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Pharr",
+      "geography_type": "city",
+      "population": "79809"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Perris",
+      "geography_type": "city",
+      "population": "79349"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Tustin",
+      "geography_type": "city",
+      "population": "79035"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Upland",
+      "geography_type": "city",
+      "population": "78940"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Napa",
+      "geography_type": "city",
+      "population": "78816"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Georgetown",
+      "geography_type": "city",
+      "population": "78803"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Milpitas",
+      "geography_type": "city",
+      "population": "78216"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Chino Hills",
+      "geography_type": "city",
+      "population": "78024"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Pleasanton",
+      "geography_type": "city",
+      "population": "77500"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Cedar Park",
+      "geography_type": "city",
+      "population": "77474"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Bellflower",
+      "geography_type": "city",
+      "population": "77396"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Woodbury",
+      "geography_type": "city",
+      "population": "76945"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Alameda",
+      "geography_type": "city",
+      "population": "76876"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Doral",
+      "geography_type": "city",
+      "population": "76490"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Rochester Hills",
+      "geography_type": "city",
+      "population": "76086"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Southfield",
+      "geography_type": "city",
+      "population": "76025"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Daytona Beach",
+      "geography_type": "city",
+      "population": "75924"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Pittsburg",
+      "geography_type": "city",
+      "population": "75868"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Mansfield",
+      "geography_type": "city",
+      "population": "75398"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Missouri City",
+      "geography_type": "city",
+      "population": "75234"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Lauderhill",
+      "geography_type": "city",
+      "population": "73961"
+    },
+    {
+      "state": "CT",
+      "jurisdiction_name": "New Britain",
+      "geography_type": "city",
+      "population": "73301"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Kalamazoo",
+      "geography_type": "city",
+      "population": "73132"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Redlands",
+      "geography_type": "city",
+      "population": "72985"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Lakeville",
+      "geography_type": "city",
+      "population": "72480"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Turlock",
+      "geography_type": "city",
+      "population": "72400"
+    }
+  ],
+  "skipped_existing_jurisdictions": [
+    {
+      "state": "NM",
+      "jurisdiction_name": "Santa Fe",
+      "geography_type": "city",
+      "population": "88224"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Citrus Heights",
+      "geography_type": "city",
+      "population": "87036"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Temple",
+      "geography_type": "city",
+      "population": "86358"
+    },
+    {
+      "state": "TX",
+      "jurisdiction_name": "Bryan",
+      "geography_type": "city",
+      "population": "86169"
+    },
+    {
+      "state": "CT",
+      "jurisdiction_name": "Danbury",
+      "geography_type": "city",
+      "population": "86086"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Lake Forest",
+      "geography_type": "city",
+      "population": "85846"
+    },
+    {
+      "state": "RI",
+      "jurisdiction_name": "Cranston",
+      "geography_type": "city",
+      "population": "82632"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Johns Creek",
+      "geography_type": "city",
+      "population": "82115"
+    },
+    {
+      "state": "CA",
+      "jurisdiction_name": "Alhambra",
+      "geography_type": "city",
+      "population": "81483"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Miami Beach",
+      "geography_type": "city",
+      "population": "81319"
+    },
+    {
+      "state": "MN",
+      "jurisdiction_name": "Plymouth",
+      "geography_type": "city",
+      "population": "79526"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Kissimmee",
+      "geography_type": "city",
+      "population": "79504"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Wyoming",
+      "geography_type": "city",
+      "population": "76865"
+    },
+    {
+      "state": "RI",
+      "jurisdiction_name": "Pawtucket",
+      "geography_type": "city",
+      "population": "75280"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Albany",
+      "geography_type": "city",
+      "population": "67939"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "St. Cloud",
+      "geography_type": "city",
+      "population": "61963"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Marietta",
+      "geography_type": "city",
+      "population": "61773"
+    },
+    {
+      "state": "OR",
+      "jurisdiction_name": "Springfield",
+      "geography_type": "city",
+      "population": "61642"
+    },
+    {
+      "state": "OR",
+      "jurisdiction_name": "Corvallis",
+      "geography_type": "city",
+      "population": "60424"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Stonecrest",
+      "geography_type": "city",
+      "population": "59917"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "North Miami",
+      "geography_type": "city",
+      "population": "59429"
+    },
+    {
+      "state": "CT",
+      "jurisdiction_name": "West Haven",
+      "geography_type": "city",
+      "population": "55147"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Pinellas Park",
+      "geography_type": "city",
+      "population": "53423"
+    },
+    {
+      "state": "MI",
+      "jurisdiction_name": "Portage",
+      "geography_type": "city",
+      "population": "49015"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Oakland Park",
+      "geography_type": "city",
+      "population": "44015"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "Greenacres",
+      "geography_type": "city",
+      "population": "43871"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Newnan",
+      "geography_type": "city",
+      "population": "43510"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Peachtree Corners",
+      "geography_type": "city",
+      "population": "42184"
+    },
+    {
+      "state": "FL",
+      "jurisdiction_name": "DeLand",
+      "geography_type": "city",
+      "population": "39832"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Peachtree City",
+      "geography_type": "city",
+      "population": "38977"
+    },
+    {
+      "state": "GA",
+      "jurisdiction_name": "Douglasville",
+      "geography_type": "city",
+      "population": "36284"
+    }
+  ],
+  "top_rejection_reasons": [
+    {
+      "reason": "no_planning_contact_found",
+      "count": 39
+    },
+    {
+      "reason": "only_generic_email_found",
+      "count": 16
+    },
+    {
+      "reason": "no_official_site_found",
+      "count": 3
+    },
+    {
+      "reason": "(found contact)",
+      "count": 2
+    }
+  ],
+  "discovery_implementation": "site_discovery_v1",
+  "max_search_queries_config": 8,
+  "resolver_method_counts": {
+    "planning_search_fallback": 19,
+    "cache": 3,
+    "guess": 22,
+    "(none)": 3,
+    "search_official": 13
+  },
+  "official_sites_resolved_count": 57,
+  "planning_fallback_used_count": 19,
+  "avg_search_queries": 1.88,
+  "no_official_site_count": 4,
+  "no_planning_contact_count": 39,
+  "only_generic_email_count": 16,
+  "top_failures": [
+    {
+      "jurisdiction_name": "Boynton Beach",
+      "state": "FL",
+      "reason": "no_official_site_found",
+      "notes": "Could not resolve official website (resolver=none, searches=8, rejections=40)",
+      "official_domain": "",
+      "resolver_method": "",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Deerfield Beach",
+      "state": "FL",
+      "reason": "no_official_site_found",
+      "notes": "Could not resolve official website (resolver=none, searches=8, rejections=40)",
+      "official_domain": "",
+      "resolver_method": "",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Largo",
+      "state": "FL",
+      "reason": "no_official_site_found",
+      "notes": "Could not resolve official website (resolver=none, searches=8, rejections=40)",
+      "official_domain": "",
+      "resolver_method": "",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Brooklyn Park",
+      "state": "MN",
+      "reason": "no_official_site_found",
+      "notes": "Could not resolve official website (resolver=none, searches=8, rejections=36)",
+      "official_domain": "www.brooklynpark.org",
+      "resolver_method": "search_official",
+      "pages_fetched": "2",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Bellflower",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.cityofbellflower.org",
+      "resolver_method": "guess",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Buena Park",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.cityofbuenapark.org",
+      "resolver_method": "guess",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Folsom",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.californiacitynews.org",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Hawthorne",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.cityofhawthorne.org",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Lakewood",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.cityoflakewood.org",
+      "resolver_method": "guess",
+      "pages_fetched": "1",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Livermore",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.livermoreca.gov",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Merced",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.cityofmerced.gov",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Milpitas",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.milpitas.gov",
+      "resolver_method": "search_official",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Mountain View",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.mountainview.gov",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Napa",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.napacity.org",
+      "resolver_method": "guess",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Newport Beach",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=cwilson@newportbeachca.gov, bramirez@newportbeachca.gov, dkopshever@newportbeachca.gov, tthai@newportbeachca.gov, odaluz@newportbeachca.gov; generic=",
+      "official_domain": "www.newportbeachca.gov",
+      "resolver_method": "guess",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Pittsburg",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=robin@teamca.org, rhickscarrera@pittsburgca.gov; generic=",
+      "official_domain": "www.teamca.org",
+      "resolver_method": "search_official",
+      "pages_fetched": "8",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Pleasanton",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "raw_emails=; generic=",
+      "official_domain": "www.cityofpleasanton.org",
+      "resolver_method": "guess",
+      "pages_fetched": "10",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Rancho Cordova",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.cityofranchocordova.org",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Redlands",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.redlands.gov",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    },
+    {
+      "jurisdiction_name": "Redwood City",
+      "state": "CA",
+      "reason": "no_planning_contact_found",
+      "notes": "No staff/planning pages returned content on official domain",
+      "official_domain": "www.redwoodcity.org",
+      "resolver_method": "planning_search_fallback",
+      "pages_fetched": "0",
+      "sources": ""
+    }
+  ],
+  "recommendation_code": "C",
+  "recommendation": "Discovery often succeeds but **contact extraction** is the bottleneck: generic department emails or missing title matches. Improve staff-page crawl depth and allowlisted title pairing."
+}

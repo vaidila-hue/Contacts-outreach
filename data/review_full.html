@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Contacts Review</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.25rem; }
+    .instructions { background: #f0f4ff; border: 1px solid #c5d4ff; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+    .toolbar { margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f5f5f5; cursor: pointer; position: sticky; top: 0; }
+    tr.has-notes { background: #fff8e1; }
+    tr:hover { filter: brightness(0.97); }
+    a { color: #1565c0; }
+    .count { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Contacts Review</h1>
+  <p class="instructions">Open this file after each build to review contacts. See harvest_diagnostics.csv for per-jurisdiction crawl/extraction details. When satisfied, edit prospects_working.csv to set review_status=approved, then run: python src/run.py build --export-only</p>
+  <div class="toolbar">
+    <label>Filter state
+      <select id="filterState"><option value="">All</option></select>
+    </label>
+    <label>Filter geography
+      <select id="filterGeo">
+        <option value="">All</option>
+        <option value="city">city</option>
+        <option value="town">town</option>
+        <option value="village">village</option>
+        <option value="borough">borough</option>
+        <option value="township">township</option>
+        <option value="county">county</option>
+      </select>
+    </label>
+    <label>Search <input type="search" id="searchBox" placeholder="jurisdiction, email…"></label>
+    <span class="count" id="rowCount"></span>
+  </div>
+  <table id="reviewTable">
+    <thead><tr id="headerRow"></tr></thead>
+    <tbody id="bodyRows"></tbody>
+  </table>
+  <script>
+    const ROWS = [{"state": "CT", "jurisdiction_name": "Danbury", "geography_type": "city", "population": "86086", "contact_name": "Waleed  Albakry, AICP, MCIP, CMFO", "contact_title": "Planning Director", "email": "w.albakry@danbury-ct.gov", "email_source_url": "https://www.danbury-ct.gov/247/Planning-Zoning", "discovery_method": "directory_harvest", "notes": "domain matches Danbury, CT: https://www.danbury-ct.gov/; domain matches Danbury, CT: https://www.danbury-ct.gov/directory; domain matches Danbury, CT: https://danbury-ct.gov"}, {"state": "FL", "jurisdiction_name": "Miami Beach", "geography_type": "city", "population": "81319", "contact_name": "Thomas Mooney", "contact_title": "Planning Director", "email": "thomasmooney@miamibeachfl.gov", "email_source_url": "https://www.miamibeachfl.gov/city-hall/planning/directory", "discovery_method": "directory_harvest", "notes": "domain matches Miami Beach, FL: https://www.miamibeachfl.gov; domain matches Miami Beach, FL: https://www.miamibeachfl.gov/planning; domain matches Miami Beach, FL: https://miamibeachfl.gov"}, {"state": "GA", "jurisdiction_name": "Albany", "geography_type": "city", "population": "67939", "contact_name": "Administrative Assistant", "contact_title": "Assistant Planning Director", "email": "shunt@albanyga.gov", "email_source_url": "https://www.albanyga.gov/City-Departments/Planning-Development/Planning-Zoning", "discovery_method": "directory_harvest", "notes": "domain matches Albany, GA: https://www.albanyga.gov; domain matches Albany, GA: https://www.albanyga.gov/City-Departments/Planning-Development/Planning-Zoning; domain matches Albany, GA: https://albanyga.gov"}, {"state": "GA", "jurisdiction_name": "Johns Creek", "geography_type": "city", "population": "82115", "contact_name": "Ben Song", "contact_title": "Community Development Director", "email": "ben.song@johnscreekga.gov", "email_source_url": "https://www.johnscreekga.gov/community-development", "discovery_method": "directory_harvest", "notes": "domain matches Johns Creek, GA: https://www.johnscreekga.gov; domain matches Johns Creek, GA: https://www.johnscreekga.gov/planning; domain matches Johns Creek, GA: https://johnscreekga.gov"}, {"state": "MI", "jurisdiction_name": "Wyoming", "geography_type": "city", "population": "76865", "contact_name": "H. Ofertn", "contact_title": "Have questions? Contact our City Planner Nicole Hofert at", "email": "hofertn@wyomingmi.gov", "email_source_url": "https://www.wyomingmi.gov/About-Wyoming/City-Departments/Community-Economic-Development/Planning-Zoning/Division-United", "discovery_method": "directory_harvest", "notes": "domain matches Wyoming, MI: https://www.wyomingmi.gov; domain matches Wyoming, MI: https://www.wyomingmi.gov/departments/planning; domain matches Wyoming, MI: https://wyomingmi.gov"}, {"state": "MN", "jurisdiction_name": "Lakeville", "geography_type": "city", "population": "72480", "contact_name": "Physical Address", "contact_title": "Community Development Director", "email": "derickson@lakevillemn.gov", "email_source_url": "https://www.lakevillemn.gov/342/Planning-Zoning", "discovery_method": "directory_harvest", "notes": "domain matches Lakeville, MN: https://www.lakevillemn.gov; domain matches Lakeville, MN: https://www.lakevillemn.gov/directory; domain matches Lakeville, MN: https://lakevillemn.gov"}, {"state": "PA", "jurisdiction_name": "Erie", "geography_type": "city", "population": "94156", "contact_name": "about David Deter", "contact_title": "Assistant Planning Director", "email": "ddeter@erie.pa.us", "email_source_url": "https://www.erie.pa.us/government/staff_directory.php", "discovery_method": "directory_harvest", "notes": "domain matches Erie, PA: https://www.erie.pa.us/; domain matches Erie, PA: https://www.erie.pa.us/government/city_offices_departments/planning_and_neighborhood_resources/zoning.php; domain matches Erie, PA: https://erie.pa.us"}, {"state": "RI", "jurisdiction_name": "Cranston", "geography_type": "city", "population": "82632", "contact_name": "Beth E. Ashman, MCP, AICP", "contact_title": "City Planning Director", "email": "jbruggemann@cranstonri.org", "email_source_url": "https://www.cranstonri.gov/departments/planning/planning-directory", "discovery_method": "directory_harvest", "notes": "domain matches Cranston, RI: https://www.cranstonri.gov; domain matches Cranston, RI: https://www.cranstonri.gov/planning; domain matches Cranston, RI: https://www.cranstonri.gov/departments/planning/planning-directory"}, {"state": "VA", "jurisdiction_name": "Lynchburg", "geography_type": "city", "population": "79255", "contact_name": "Director, Community Development", "contact_title": "Planning Director", "email": "tom.martin@lynchburgva.gov", "email_source_url": "https://www.lynchburgva.gov/community-development", "discovery_method": "directory_harvest", "notes": "domain matches Lynchburg, VA: https://www.lynchburgva.gov; domain matches Lynchburg, VA: https://www.lynchburgva.gov/community-development; domain matches Lynchburg, VA: https://lynchburgva.gov"}, {"state": "WA", "jurisdiction_name": "Federal Way", "geography_type": "city", "population": "99232", "contact_name": "For Business License Inquiries", "contact_title": "Planning Director", "email": "meredith.neal@cityoffederalway.com", "email_source_url": "https://www.federalwaywa.gov/economic-development", "discovery_method": "directory_harvest", "notes": "domain matches Federal Way, WA: https://www.federalwaywa.gov; domain matches Federal Way, WA: https://www.federalwaywa.gov/community-development; domain matches Federal Way, WA: https://www.federalwaywa.gov/directory"}, {"state": "FL", "jurisdiction_name": "Fort Myers", "geography_type": "city", "population": "91730", "contact_name": "J. Mitchell", "contact_title": "Planning Manager", "email": "jmitchell@fortmyers.gov", "email_source_url": "https://fortmyers.gov/planning", "discovery_method": "directory_harvest", "notes": "Orphan email recovery: planning title and direct email found on same page but not structurally paired; verify contact before outreach."}, {"state": "FL", "jurisdiction_name": "Kissimmee", "geography_type": "city", "population": "79504", "contact_name": "CRA Manager", "contact_title": "Planning Director", "email": "%e2%80%8bsamia.singleton@kissimmee.gov", "email_source_url": "https://www.kissimmee.gov/My-Government/City-Departments-Offices/Economic-Development", "discovery_method": "directory_harvest", "notes": ""}, {"state": "FL", "jurisdiction_name": "Palm Coast", "geography_type": "city", "population": "94362", "contact_name": "Phong Nguyen", "contact_title": "Planning Manager", "email": "pnguyen@palmcoastgov.com", "email_source_url": "https://www.palmcoast.gov/planning", "discovery_method": "directory_harvest", "notes": ""}, {"state": "MI", "jurisdiction_name": "Novi", "geography_type": "city", "population": "66224", "contact_name": "Lindsay Bell", "contact_title": "Director of Planning", "email": "lbell@cityofnovi.org", "email_source_url": "https://www.cityofnovi.org/services/community-development", "discovery_method": "directory_harvest", "notes": ""}, {"state": "MI", "jurisdiction_name": "Troy", "geography_type": "city", "population": "87307", "contact_name": "S. Ubscribers", "contact_title": "Community Development Director", "email": "subscribers@troymi.gov", "email_source_url": "https://www.troymi.gov/planning", "discovery_method": "directory_harvest", "notes": "domain matches Troy, MI: https://www.troymi.gov/; domain matches Troy, MI: https://www.troymi.gov/planning; domain matches Troy, MI: https://troymi.gov; Orphan email recovery: planning title and direct email found on same page but not structurally paired; verify contact before outreach."}, {"state": "MN", "jurisdiction_name": "Brooklyn Park", "geography_type": "city", "population": "84349", "contact_name": "Paul Mogush", "contact_title": "Planning Director", "email": "paul.mogush@brooklynpark.org", "email_source_url": "https://www.brooklynpark.org/planning-zoning-and-development", "discovery_method": "directory_harvest", "notes": ""}, {"state": "WI", "jurisdiction_name": "Eau Claire", "geography_type": "city", "population": "69274", "contact_name": "Map & Directions", "contact_title": "Planning Director", "email": "rod.eslinger@eauclairecounty.gov", "email_source_url": "https://www.eauclairecounty.gov/departments/planning_and_development/permits.php", "discovery_method": "directory_harvest", "notes": ""}];
+    const COLS = ["state", "jurisdiction_name", "geography_type", "population", "contact_name", "contact_title", "email", "email_source_url", "discovery_method", "notes"];
+
+    function rowClass(row) {
+      return row.notes ? "has-notes" : "";
+    }
+
+    function sortRows(rows) {
+      return [...rows].sort((a, b) => {
+        if (a.state !== b.state) return a.state.localeCompare(b.state);
+        const pa = parseInt(a.population || "0", 10);
+        const pb = parseInt(b.population || "0", 10);
+        if (pa !== pb) return pb - pa;
+        return a.jurisdiction_name.localeCompare(b.jurisdiction_name);
+      });
+    }
+
+    function cellHtml(col, val) {
+      if (col === "email_source_url" && val) {
+        const esc = val.replace(/"/g, "&quot;");
+        return `<a href="${esc}" target="_blank" rel="noopener">${esc}</a>`;
+      }
+      return (val || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    }
+
+    function render() {
+      const state = document.getElementById("filterState").value;
+      const geo = document.getElementById("filterGeo").value;
+      const q = document.getElementById("searchBox").value.toLowerCase();
+      let filtered = ROWS.filter(r => {
+        if (state && r.state !== state) return false;
+        if (geo && r.geography_type !== geo) return false;
+        if (q) {
+          const hay = COLS.map(c => r[c] || "").join(" ").toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      filtered = sortRows(filtered);
+      document.getElementById("rowCount").textContent = filtered.length + " contact(s)";
+      const tbody = document.getElementById("bodyRows");
+      tbody.innerHTML = "";
+      for (const row of filtered) {
+        const tr = document.createElement("tr");
+        tr.className = rowClass(row);
+        for (const col of COLS) {
+          const td = document.createElement("td");
+          td.innerHTML = cellHtml(col, row[col] || "");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+
+    const states = [...new Set(ROWS.map(r => r.state).filter(Boolean))].sort();
+    const stateSel = document.getElementById("filterState");
+    for (const st of states) {
+      const opt = document.createElement("option");
+      opt.value = st;
+      opt.textContent = st;
+      stateSel.appendChild(opt);
+    }
+
+    const header = document.getElementById("headerRow");
+    for (const col of COLS) {
+      const th = document.createElement("th");
+      th.textContent = col;
+      header.appendChild(th);
+    }
+    ["filterState", "filterGeo", "searchBox"].forEach(id => {
+      document.getElementById(id).addEventListener("input", render);
+      document.getElementById(id).addEventListener("change", render);
+    });
+    render();
+  </script>
+</body>
+</html>
