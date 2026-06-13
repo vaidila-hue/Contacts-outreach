@@ -26,6 +26,7 @@ from src.send_queue_worker import get_worker_status, start_send_queue_worker
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
     delete_outreach_row,
+    delete_outreach_rows,
     read_outreach_rows,
     row_has_generic_email,
     row_message_templates,
@@ -46,6 +47,16 @@ from src.outreach_test import (
 from src.outreach_launch import CRM_URL, check_port_available, schedule_browser_open
 from src.paths import OUTREACH_PORT, REPLY_STATUS_VALUES
 
+# Lucide Settings icon (inline SVG; matches lucide-react Settings stroke style).
+LUCIDE_SETTINGS_ICON = (
+    '<svg class="lucide lucide-settings" xmlns="http://www.w3.org/2000/svg" '
+    'width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>'
+    '<circle cx="12" cy="12" r="3"/>'
+    "</svg>"
+)
+
 US_STATE_CODES = (
     "AL,AK,AZ,AR,CA,CO,CT,DE,FL,GA,HI,ID,IL,IN,IA,KS,KY,LA,ME,MD,MA,MI,MN,MS,MO,"
     "MT,NE,NV,NH,NJ,NM,NY,NC,ND,OH,OK,OR,PA,RI,SC,SD,TN,TX,UT,VT,VA,WA,WV,WI,WY,DC"
@@ -59,6 +70,8 @@ PAGE_TEMPLATE = """
   <title>Planzookie Outreach CRM</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #e2e2e2; }
+    .page-header h1 { margin: 0; font-size: 22px; line-height: 1.2; letter-spacing: -0.01em; }
     h1 { margin-bottom: 8px; }
     .dashboard { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; margin: 0 0 12px; padding: 10px; background: #f7f7f7; border: 1px solid #ddd; }
     .metric { min-width: 72px; }
@@ -104,8 +117,97 @@ PAGE_TEMPLATE = """
     .menu-dropdown button { display: block; width: 100%; text-align: left; padding: 7px 12px; border: none; background: none; cursor: pointer; font-size: 12px; }
     .menu-dropdown button:hover { background: #f0f0f0; }
     .menu-delete { color: #a00; }
+    .settings-menu { position: relative; flex-shrink: 0; }
+    .settings-trigger { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: #fff; border: 1px solid #d0d0d0; color: #444; cursor: pointer; line-height: 0; border-radius: 8px; transition: background .15s, border-color .15s, box-shadow .15s, color .15s; padding: 0; }
+    .settings-trigger:hover { background: #f5f5f5; border-color: #999; color: #111; }
+    .settings-trigger:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #06c; }
+    .settings-trigger .lucide-settings { width: 18px; height: 18px; display: block; flex-shrink: 0; }
+    .settings-dropdown { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid #d8d8d8; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12); z-index: 6; min-width: 240px; padding: 6px 0; overflow: hidden; }
+    .settings-menu.open .settings-dropdown { display: block; }
+    .settings-dropdown button,
+    .settings-dropdown .settings-item { display: block; width: 100%; text-align: left; padding: 10px 14px; border: none; background: none; cursor: pointer; font-size: 13px; box-sizing: border-box; color: #111; }
+    .settings-dropdown button:hover,
+    .settings-dropdown button:focus-visible,
+    .settings-dropdown .settings-item:hover,
+    .settings-dropdown .settings-item:focus-visible { background: #f3f6fa; outline: none; }
+    .settings-dropdown form { margin: 0; }
+    .settings-dropdown-divider { height: 1px; background: #ececec; margin: 6px 0; }
+    .col-select { width: 34px; text-align: center; white-space: nowrap; }
+    .col-select-label { display: block; font-size: 10px; font-weight: normal; color: #666; margin-top: 2px; }
+    .btn-danger { color: #a00; border-color: #a88; }
+    .btn-danger:disabled { color: #999; border-color: #ccc; cursor: not-allowed; }
   </style>
   <script>
+    function closeSettingsMenu() {
+      var menu = document.getElementById('settings-menu');
+      var trigger = document.getElementById('settings-trigger');
+      if (menu) menu.classList.remove('open');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    }
+    function openSettingsMenu() {
+      var menu = document.getElementById('settings-menu');
+      var trigger = document.getElementById('settings-trigger');
+      if (!menu) return;
+      closeRowMenus();
+      menu.classList.add('open');
+      if (trigger) trigger.setAttribute('aria-expanded', 'true');
+      var firstItem = menu.querySelector('.settings-item');
+      if (firstItem) firstItem.focus();
+    }
+    function toggleSettingsMenu(event) {
+      event.stopPropagation();
+      var menu = document.getElementById('settings-menu');
+      if (!menu) return;
+      if (menu.classList.contains('open')) closeSettingsMenu();
+      else openSettingsMenu();
+    }
+    document.addEventListener('click', function(event) {
+      closeRowMenus();
+      var menu = document.getElementById('settings-menu');
+      if (menu && !menu.contains(event.target)) closeSettingsMenu();
+    });
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        closeSettingsMenu();
+        closeRowMenus();
+      }
+    });
+    function updateDeleteSelectedButton() {
+      var n = document.querySelectorAll('.row-select-cb:checked').length;
+      var btn = document.getElementById('delete-selected-btn');
+      if (btn) btn.disabled = n === 0;
+    }
+    function toggleSelectAll(source) {
+      document.querySelectorAll('.row-select-cb').forEach(function(cb) { cb.checked = source.checked; });
+      updateDeleteSelectedButton();
+    }
+    function confirmDeleteSelected() {
+      var boxes = document.querySelectorAll('.row-select-cb:checked');
+      if (boxes.length === 0) return;
+      if (!confirm('Remove ' + boxes.length + ' selected contact(s) from the CRM? This cannot be undone.')) return;
+      var form = document.getElementById('delete-selected-form');
+      form.innerHTML = '';
+      boxes.forEach(function(cb) {
+        [
+          ['orig_email', cb.dataset.origEmail],
+          ['orig_state', cb.dataset.origState],
+          ['orig_jurisdiction_name', cb.dataset.origJurisdiction]
+        ].forEach(function(pair) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = pair[0];
+          input.value = pair[1];
+          form.appendChild(input);
+        });
+      });
+      form.submit();
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.row-select-cb').forEach(function(cb) {
+        cb.addEventListener('change', updateDeleteSelectedButton);
+      });
+      updateDeleteSelectedButton();
+    });
     function closeRowMenus() {
       document.querySelectorAll('.row-menu.open').forEach(function(el) { el.classList.remove('open'); });
     }
@@ -116,7 +218,6 @@ PAGE_TEMPLATE = """
       closeRowMenus();
       if (!wasOpen) menu.classList.add('open');
     }
-    document.addEventListener('click', closeRowMenus);
     function confirmDeleteRow(idx) {
       closeRowMenus();
       if (confirm('Remove this contact from the CRM? This cannot be undone.')) {
@@ -193,7 +294,23 @@ PAGE_TEMPLATE = """
   </script>
 </head>
 <body>
-  <h1>Planzookie Outreach CRM</h1>
+  <div class="page-header">
+    <h1>Planzookie Outreach CRM</h1>
+    <div class="settings-menu" id="settings-menu">
+      <button type="button" id="settings-trigger" class="settings-trigger" onclick="toggleSettingsMenu(event)" aria-label="Settings" aria-haspopup="menu" aria-expanded="false" title="Settings">{{ settings_icon|safe }}</button>
+      <div class="settings-dropdown" role="menu" aria-label="CRM settings">
+        <button type="button" class="settings-item" role="menuitem" onclick="closeSettingsMenu(); document.getElementById('queue-settings-modal').classList.add('open')">Queue Settings</button>
+        <button type="button" class="settings-item" role="menuitem" onclick="closeSettingsMenu(); document.getElementById('harvest-modal').classList.add('open')">Reconfigure Contact Harvest</button>
+        <div class="settings-dropdown-divider" role="separator"></div>
+        <form method="post" action="{{ url_for('pause_send_queue') }}">
+          <button type="submit" class="settings-item" role="menuitem">Pause Sending</button>
+        </form>
+        <form method="post" action="{{ url_for('resume_send_queue') }}">
+          <button type="submit" class="settings-item" role="menuitem">Resume Sending</button>
+        </form>
+      </div>
+    </div>
+  </div>
   {% if message %}
   <div class="msg" id="flash-msg" role="status">
     <span>{{ message }}</span>
@@ -233,18 +350,16 @@ PAGE_TEMPLATE = """
       <button type="submit">Save changes</button>
       <button type="button" class="btn" onclick="openDefaultMessageModal()">Default Message</button>
       <button formaction="{{ url_for('queue_ready') }}" formmethod="post" type="submit" onclick="return confirm('Queue all Ready contacts for throttled sending?')">Queue Ready Emails</button>
-      <button formaction="{{ url_for('pause_send_queue') }}" formmethod="post" type="submit" class="btn">Pause Sending</button>
-      <button formaction="{{ url_for('resume_send_queue') }}" formmethod="post" type="submit" class="btn">Resume Sending</button>
       <button formaction="{{ url_for('cancel_send_queue') }}" formmethod="post" type="submit" class="btn" onclick="return confirm('Remove all queued contacts from the send queue?')">Cancel Queue</button>
       <button formaction="{{ url_for('send_next_now') }}" formmethod="post" type="submit" class="btn">Send Next Now</button>
-      <button type="button" class="btn" onclick="document.getElementById('queue-settings-modal').classList.add('open')">Queue Settings</button>
-      <button type="button" class="btn" onclick="document.getElementById('harvest-modal').classList.add('open')">Reconfigure Contact Harvest</button>
+      <button type="button" id="delete-selected-btn" class="btn btn-danger" disabled onclick="confirmDeleteSelected()">Delete selected</button>
       <button formaction="{{ url_for('find_more') }}" formmethod="post" type="submit" onclick="return confirm('Run harvest and append new contacts? This may take several minutes.')">Find More Contacts</button>
       <a class="btn" href="{{ url_for('test_email') }}">Send Test Email</a>
     </div>
     <table>
       <thead>
         <tr>
+          <th class="col-select"><input type="checkbox" id="select-all-rows" aria-label="Select all visible rows" onclick="toggleSelectAll(this)"><span class="col-select-label">Select</span></th>
           <th>Ready</th>
           <th>Email name</th>
           <th>Status</th>
@@ -264,6 +379,12 @@ PAGE_TEMPLATE = """
         {% for row in rows %}
         {% set idx = loop.index0 %}
         <tr class="{% if loop.index0 is odd %}row-alt{% endif %}">
+          <td class="col-select">
+            <input type="checkbox" class="row-select-cb" aria-label="Select {{ row.jurisdiction_name }}, {{ row.state }} for bulk actions"
+              data-orig-email="{{ row._orig_email }}"
+              data-orig-state="{{ row._orig_state }}"
+              data-orig-jurisdiction="{{ row._orig_jurisdiction_name }}">
+          </td>
           <td>
             <input type="hidden" id="orig-email-{{ idx }}" name="_orig_email" value="{{ row._orig_email }}">
             <input type="hidden" id="orig-state-{{ idx }}" name="_orig_state" value="{{ row._orig_state }}">
@@ -322,6 +443,8 @@ PAGE_TEMPLATE = """
       </tbody>
     </table>
   </form>
+
+  <form id="delete-selected-form" method="post" action="{{ url_for('delete_selected_rows') }}" style="display:none"></form>
 
   <div id="queue-settings-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
     <div class="modal" onclick="event.stopPropagation()">
@@ -674,6 +797,7 @@ def create_app(*, start_worker: bool = False) -> Flask:
             default_message=default_message,
             us_states=US_STATE_CODES,
             message=message,
+            settings_icon=LUCIDE_SETTINGS_ICON,
         )
 
     @app.post("/save")
@@ -692,6 +816,22 @@ def create_app(*, start_worker: bool = False) -> Flask:
         )
         filter_name = request.args.get("filter", "all")
         msg = "Contact removed." if ok else "Contact not found."
+        return redirect(url_for("index", filter=filter_name, msg=msg))
+
+    @app.post("/rows/delete-selected")
+    def delete_selected_rows():
+        emails = request.form.getlist("orig_email")
+        states = request.form.getlist("orig_state")
+        jurisdictions = request.form.getlist("orig_jurisdiction_name")
+        keys = list(zip(emails, states, jurisdictions))
+        removed = delete_outreach_rows(keys)
+        filter_name = request.args.get("filter", "all")
+        if removed == 0:
+            msg = "No contacts were deleted."
+        elif removed == 1:
+            msg = "Removed 1 contact."
+        else:
+            msg = f"Removed {removed} contacts."
         return redirect(url_for("index", filter=filter_name, msg=msg))
 
     @app.post("/harvest-config/save")

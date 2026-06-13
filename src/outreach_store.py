@@ -264,17 +264,26 @@ def update_outreach_rows(updates: list[dict[str, str]]) -> None:
 
 def delete_outreach_row(orig_email: str, orig_state: str, orig_jurisdiction: str) -> bool:
     """Remove one outreach row by its original key."""
+    return delete_outreach_rows([(orig_email, orig_state, orig_jurisdiction)]) == 1
+
+
+def delete_outreach_rows(keys: list[tuple[str, str, str]]) -> int:
+    """Remove outreach rows by original keys. Returns number removed."""
+    if not keys:
+        return 0
+    delete_set = {
+        (email.strip().lower(), state.strip().upper(), jurisdiction.strip())
+        for email, state, jurisdiction in keys
+        if email.strip() and state.strip() and jurisdiction.strip()
+    }
+    if not delete_set:
+        return 0
     rows = read_outreach_rows()
-    key = (
-        orig_email.strip().lower(),
-        orig_state.strip().upper(),
-        orig_jurisdiction.strip(),
-    )
-    kept = [r for r in rows if outreach_key(r) != key]
-    if len(kept) == len(rows):
-        return False
-    write_outreach_rows(kept)
-    return True
+    kept = [r for r in rows if outreach_key(r) not in delete_set]
+    removed = len(rows) - len(kept)
+    if removed:
+        write_outreach_rows(kept)
+    return removed
 
 
 def is_approved(row: dict[str, str]) -> bool:

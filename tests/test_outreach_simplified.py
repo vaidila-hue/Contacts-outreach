@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from src.outreach_cli import run_outreach_send_ready
 from src.outreach_crm import FILTER_OPTIONS, format_sent_date_display, is_ready, row_matches_filter
 from src.outreach_store import (
     delete_outreach_row,
+    delete_outreach_rows,
     prepare_outreach,
     read_outreach_rows,
     ready_send_candidates,
@@ -192,6 +194,12 @@ def test_greeting_substitution_at_render_time(crm_paths):
     assert "Hi Nikki," in body
 
 
+def _main_toolbar_html(html: str) -> str:
+    match = re.search(r'<div class="actions">(.*?)</div>\s*<table>', html, re.S)
+    assert match, "main toolbar not found"
+    return match.group(1)
+
+
 def test_ui_renders_simplified_controls(crm_paths):
     working, _, _ = crm_paths
     write_csv(working, [_working_row()], WORKING_COLUMNS)
@@ -203,22 +211,43 @@ def test_ui_renders_simplified_controls(crm_paths):
         html = resp.data.decode("utf-8")
         assert resp.status_code == 200
         assert "Planzookie Outreach CRM" in html
+        assert "page-header" in html
+        assert "settings-trigger" in html
+        assert 'class="lucide lucide-settings"' in html
+        assert "&#9881;" not in html
+        assert 'aria-hidden="true"' in html
+        assert 'aria-expanded="false"' in html
+        assert 'role="menu"' in html
+        assert "settings-dropdown" in html
+        toolbar = _main_toolbar_html(html)
+        assert "Pause Sending" not in toolbar
+        assert "Resume Sending" not in toolbar
+        assert "Queue Settings" not in toolbar
+        assert "Reconfigure Contact Harvest" not in toolbar
+        assert "Queue Ready Emails" in toolbar
+        assert "Delete selected" in toolbar
+        assert "Pause Sending" in html
+        assert "Resume Sending" in html
+        assert "Queue Settings" in html
+        assert "Reconfigure Contact Harvest" in html
         assert "Ready contacts → send emails" not in html
         assert "Email name" in html
         assert "Greeting" not in html
         assert "Follow-up</th>" not in html
         assert "Needs Follow-Up" not in html
-        assert "Queue Ready Emails" in html
-        assert "Pause Sending" in html
         assert "Send Next Now" in html
-        assert "Queue Settings" in html
         assert "Cadence" in html or "5 min" in html
         assert "Queued:" in html or ">Queued<" in html
         assert "Default Message" in html
+        assert "row-select-cb" in html
+        assert "select-all-rows" in html
+        assert "col-select-label" in html
+        assert ">Select</span>" in html
         assert "row-menu" in html
         assert "menu-dropdown" in html
         assert ">Details</button>" in html
         assert "menu-delete" in html
+        assert "delete-selected-btn" in html
         assert "flash-msg" in html
         assert "msg-dismiss" in html
         assert "row-alt" in html
@@ -232,6 +261,83 @@ def test_delete_row_removes_contact(crm_paths):
     prepare_outreach()
     assert delete_outreach_row("ndevaughn@fortmyers.gov", "FL", "Fort Myers")
     assert read_outreach_rows() == []
+
+
+def _outreach_row(email: str, state: str, jurisdiction: str, name: str) -> dict[str, str]:
+    from src.paths import OUTREACH_COLUMNS
+
+    row = {col: "" for col in OUTREACH_COLUMNS}
+    row.update(
+        {
+            "contact_name": name,
+            "contact_title": "Director",
+            "jurisdiction_name": jurisdiction,
+            "state": state,
+            "email": email,
+            "send_status": "prepared",
+            "reply_status": "not_sent",
+        }
+    )
+    return row
+
+
+def test_delete_outreach_rows_removes_selected_only(crm_paths):
+    write_outreach_rows(
+        [
+            _outreach_row("a@city.gov", "FL", "Alpha", "A"),
+            _outreach_row("b@city.gov", "FL", "Beta", "B"),
+            _outreach_row("c@city.gov", "FL", "Gamma", "C"),
+        ]
+    )
+    removed = delete_outreach_rows(
+        [
+            ("a@city.gov", "FL", "Alpha"),
+            ("c@city.gov", "FL", "Gamma"),
+        ]
+    )
+    assert removed == 2
+    remaining = read_outreach_rows()
+    assert len(remaining) == 1
+    assert remaining[0]["email"] == "b@city.gov"
+
+
+def test_delete_selected_rows_route(crm_paths):
+    write_outreach_rows(
+        [
+            _outreach_row("a@city.gov", "FL", "Alpha", "A"),
+            _outreach_row("b@city.gov", "FL", "Beta", "B"),
+        ]
+    )
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        resp = client.post(
+            "/rows/delete-selected",
+            data={
+                "orig_email": ["a@city.gov"],
+                "orig_state": ["FL"],
+                "orig_jurisdiction_name": ["Alpha"],
+            },
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+        assert b"Removed 1 contact" in resp.data
+    rows = read_outreach_rows()
+    assert len(rows) == 1
+    assert rows[0]["email"] == "b@city.gov"
+
+
+def test_delete_selected_uses_persistence_path(crm_paths, monkeypatch):
+    write_outreach_rows([_outreach_row("a@city.gov", "FL", "Alpha", "A")])
+    calls: list[list] = []
+
+    def spy(rows, **kwargs):
+        calls.append(rows)
+
+    monkeypatch.setattr("src.outreach_persistence.write_outreach_csv_atomic", spy)
+    delete_outreach_rows([("a@city.gov", "FL", "Alpha")])
+    assert len(calls) == 1
+    assert calls[0] == []
 
 
 def test_delete_row_route(crm_paths):
