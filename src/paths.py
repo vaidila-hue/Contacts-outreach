@@ -76,6 +76,7 @@ OUTREACH_COLUMNS = [
     "follow_up_needed",
     "follow_up_at",
     "outreach_notes",
+    "contact_source",
     "jurisdiction_type",
     "population",
     "jurisdiction_name",
@@ -156,6 +157,9 @@ EDITABLE_TRACKING_FIELDS = (
 OUTREACH_PORT = 8765
 EXPECTED_GMAIL_ACCOUNT = "vaidila@planzookie.com"
 GMAIL_CACHE_DIR = CACHE_DIR / "gmail"
+
+CONTACT_SOURCE_HARVESTED = "Harvested"
+CONTACT_SOURCE_OPTIONS = ("Manual", "Referral", "Conference", "LinkedIn", "Other")
 
 REJECTED_COLUMNS = [
     "state",

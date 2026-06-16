@@ -17,6 +17,7 @@ from src.outreach_crm import (
     merge_outreach_row,
     outreach_key,
     save_crm_rows,
+    validate_manual_contact_fields,
 )
 from src.harvest_summary import PrepareStats
 from src.jurisdiction_utils import jurisdiction_match_key
@@ -29,6 +30,8 @@ from src.outreach_template import (
     save_default_message,
 )
 from src.paths import (
+    CONTACT_SOURCE_HARVESTED,
+    CONTACT_SOURCE_OPTIONS,
     DIAGNOSTICS_CSV,
     DIAGNOSTICS_COLUMNS,
     OUTREACH_COLUMNS,
@@ -54,6 +57,8 @@ def read_outreach_rows() -> list[dict[str, str]]:
     for row in rows:
         if not row.get("reply_status"):
             row["reply_status"] = "not_sent"
+        if not row.get("contact_source"):
+            row["contact_source"] = CONTACT_SOURCE_HARVESTED
     return rows
 
 
@@ -143,6 +148,7 @@ def _build_row_from_sources(
             "follow_up_needed": "",
             "follow_up_at": "",
             "outreach_notes": "",
+            "contact_source": CONTACT_SOURCE_HARVESTED,
             "jurisdiction_type": jurisdiction_type,
             "population": str(population),
             "jurisdiction_name": working_row.get("jurisdiction_name", ""),
@@ -166,6 +172,81 @@ def _build_row_from_sources(
         }
     )
     return row
+
+
+def add_manual_contact(
+    *,
+    jurisdiction_name: str,
+    state: str,
+    contact_name: str = "",
+    contact_title: str = "",
+    email: str,
+    contact_source: str = "Manual",
+    outreach_notes: str = "",
+) -> tuple[bool, str]:
+    """Append a manually entered contact to outreach.csv."""
+    jurisdiction = (jurisdiction_name or "").strip()
+    state_code = (state or "").strip().upper()
+    email_norm = (email or "").strip().lower()
+    source = (contact_source or "Manual").strip() or "Manual"
+    if source not in CONTACT_SOURCE_OPTIONS:
+        source = "Manual"
+
+    rows = read_outreach_rows()
+    ok, err = validate_manual_contact_fields(
+        jurisdiction_name=jurisdiction,
+        state=state_code,
+        email=email_norm,
+        contact_source=source,
+        existing_rows=rows,
+        allowed_sources=CONTACT_SOURCE_OPTIONS,
+    )
+    if not ok:
+        return False, err
+
+    greeting = greeting_name_from_contact_name((contact_name or "").strip())
+    default = load_default_message()
+    row = empty_outreach_row()
+    row.update(
+        {
+            "approved": "",
+            "greeting_name": greeting,
+            "send_status": PREPARED_STATUS,
+            "sent_at": "",
+            "reply_status": "not_sent",
+            "first_reply_at": "",
+            "meeting_requested": "",
+            "meeting_scheduled_for": "",
+            "meeting_completed": "",
+            "follow_up_needed": "",
+            "follow_up_at": "",
+            "outreach_notes": (outreach_notes or "").strip(),
+            "contact_source": source,
+            "jurisdiction_type": "",
+            "population": "",
+            "jurisdiction_name": jurisdiction,
+            "state": state_code,
+            "contact_name": (contact_name or "").strip(),
+            "contact_title": (contact_title or "").strip(),
+            "email": email_norm,
+            "jurisdiction_url": "",
+            "email_source_url": "",
+            "subject": default.subject,
+            "body": default.body,
+            "message_customized": "",
+            "default_message_version": str(default.version),
+            "gmail_draft_id": "",
+            "gmail_message_id": "",
+            "prepared_at": _now_iso(),
+            "approved_at": "",
+            "drafted_at": "",
+            "error": "",
+        }
+    )
+    rows.append(row)
+    write_outreach_rows(rows)
+    label = (contact_name or "").strip() or email_norm
+    return True, f"Added contact {label} in {jurisdiction}, {state_code}."
 
 
 def prepare_outreach(

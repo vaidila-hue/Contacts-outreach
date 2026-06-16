@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from src.outreach_template import apply_default_templates_to_row, is_message_customized, load_default_message
@@ -66,6 +67,8 @@ FILTER_OPTIONS = (
     ("meeting_scheduled", "Meeting Scheduled"),
     ("meeting_completed", "Meeting Completed"),
 )
+
+_BASIC_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _now_iso() -> str:
@@ -153,6 +156,56 @@ def duplicate_match(existing: dict[str, str], candidate: dict[str, str]) -> bool
 
 def is_duplicate_of_any(candidate: dict[str, str], rows: list[dict[str, str]]) -> bool:
     return any(duplicate_match(r, candidate) for r in rows)
+
+
+def has_exact_outreach_duplicate(candidate: dict[str, str], rows: list[dict[str, str]]) -> bool:
+    """True when email + state + jurisdiction_name already exists."""
+    key = outreach_key(candidate)
+    return any(outreach_key(row) == key for row in rows)
+
+
+def is_basic_email_shape(email: str) -> bool:
+    return bool(_BASIC_EMAIL_RE.match((email or "").strip()))
+
+
+def validate_manual_contact_fields(
+    *,
+    jurisdiction_name: str,
+    state: str,
+    email: str,
+    contact_source: str,
+    existing_rows: list[dict[str, str]],
+    allowed_sources: tuple[str, ...],
+) -> tuple[bool, str]:
+    jurisdiction = (jurisdiction_name or "").strip()
+    state_code = (state or "").strip().upper()
+    email_norm = (email or "").strip().lower()
+    source = (contact_source or "").strip()
+
+    if not jurisdiction:
+        return False, "Jurisdiction is required."
+    if not state_code:
+        return False, "State is required."
+    if len(state_code) != 2 or not state_code.isalpha():
+        return False, "State must be a 2-letter code (for example FL or OR)."
+    if not email_norm:
+        return False, "Email is required."
+    if not is_basic_email_shape(email_norm):
+        return False, "Enter a valid email address."
+    if source and source not in allowed_sources:
+        return False, f"Source must be one of: {', '.join(allowed_sources)}."
+
+    candidate = {
+        "email": email_norm,
+        "state": state_code,
+        "jurisdiction_name": jurisdiction,
+    }
+    if has_exact_outreach_duplicate(candidate, existing_rows):
+        return (
+            False,
+            f"A contact already exists for {jurisdiction}, {state_code} with email {email_norm}.",
+        )
+    return True, ""
 
 
 def merge_outreach_row(

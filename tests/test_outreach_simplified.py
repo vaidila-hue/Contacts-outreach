@@ -239,6 +239,7 @@ def test_ui_renders_simplified_controls(crm_paths):
         assert "Cadence" in html or "5 min" in html
         assert "Queued:" in html or ">Queued<" in html
         assert "Default Message" in html
+        assert "Add Contact" in toolbar
         assert "row-select-cb" in html
         assert "select-all-rows" in html
         assert "col-select-label" in html

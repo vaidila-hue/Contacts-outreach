@@ -25,6 +25,7 @@ from src.send_queue_config_store import (
 from src.send_queue_worker import get_worker_status, start_send_queue_worker
 from src.outreach_crm import FILTER_OPTIONS, compute_dashboard, format_sent_date_display, row_matches_filter
 from src.outreach_store import (
+    add_manual_contact,
     delete_outreach_row,
     delete_outreach_rows,
     read_outreach_rows,
@@ -45,7 +46,7 @@ from src.outreach_test import (
     send_test_email,
 )
 from src.outreach_launch import CRM_URL, check_port_available, schedule_browser_open
-from src.paths import OUTREACH_PORT, REPLY_STATUS_VALUES
+from src.paths import CONTACT_SOURCE_OPTIONS, OUTREACH_PORT, REPLY_STATUS_VALUES
 
 # Lucide Settings icon (inline SVG; matches lucide-react Settings stroke style).
 LUCIDE_SETTINGS_ICON = (
@@ -348,6 +349,7 @@ PAGE_TEMPLATE = """
   <form id="crm-form" method="post" action="{{ url_for('save') }}">
     <div class="actions">
       <button type="submit">Save changes</button>
+      <button type="button" class="btn" onclick="document.getElementById('add-contact-modal').classList.add('open')">Add Contact</button>
       <button type="button" class="btn" onclick="openDefaultMessageModal()">Default Message</button>
       <button formaction="{{ url_for('queue_ready') }}" formmethod="post" type="submit" onclick="return confirm('Queue all Ready contacts for throttled sending?')">Queue Ready Emails</button>
       <button formaction="{{ url_for('cancel_send_queue') }}" formmethod="post" type="submit" class="btn" onclick="return confirm('Remove all queued contacts from the send queue?')">Cancel Queue</button>
@@ -445,6 +447,41 @@ PAGE_TEMPLATE = """
   </form>
 
   <form id="delete-selected-form" method="post" action="{{ url_for('delete_selected_rows') }}" style="display:none"></form>
+
+  <div id="add-contact-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h2>Add Contact</h2>
+      <form method="post" action="{{ url_for('add_contact') }}">
+        <label for="add-jurisdiction_name">Jurisdiction <span style="font-weight:normal">(required)</span></label>
+        <input id="add-jurisdiction_name" type="text" name="jurisdiction_name" required>
+        <label for="add-state">State <span style="font-weight:normal">(required)</span></label>
+        <select id="add-state" name="state" required>
+          <option value="">—</option>
+          {% for st in us_states %}
+          <option value="{{ st }}">{{ st }}</option>
+          {% endfor %}
+        </select>
+        <label for="add-contact_name">Contact Name</label>
+        <input id="add-contact_name" type="text" name="contact_name">
+        <label for="add-contact_title">Title</label>
+        <input id="add-contact_title" type="text" name="contact_title">
+        <label for="add-email">Email <span style="font-weight:normal">(required)</span></label>
+        <input id="add-email" type="email" name="email" required>
+        <label for="add-contact_source">Source</label>
+        <select id="add-contact_source" name="contact_source">
+          {% for src in contact_source_options %}
+          <option value="{{ src }}" {% if src == 'Manual' %}selected{% endif %}>{{ src }}</option>
+          {% endfor %}
+        </select>
+        <label for="add-outreach_notes">Notes</label>
+        <textarea id="add-outreach_notes" name="outreach_notes" rows="3"></textarea>
+        <div class="actions">
+          <button type="button" onclick="document.getElementById('add-contact-modal').classList.remove('open')">Cancel</button>
+          <button type="submit">Save Contact</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="queue-settings-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
     <div class="modal" onclick="event.stopPropagation()">
@@ -796,9 +833,23 @@ def create_app(*, start_worker: bool = False) -> Flask:
             send_queue_config=send_queue_config,
             default_message=default_message,
             us_states=US_STATE_CODES,
+            contact_source_options=CONTACT_SOURCE_OPTIONS,
             message=message,
             settings_icon=LUCIDE_SETTINGS_ICON,
         )
+
+    @app.post("/contacts/add")
+    def add_contact():
+        ok, msg = add_manual_contact(
+            jurisdiction_name=request.form.get("jurisdiction_name", ""),
+            state=request.form.get("state", ""),
+            contact_name=request.form.get("contact_name", ""),
+            contact_title=request.form.get("contact_title", ""),
+            email=request.form.get("email", ""),
+            contact_source=request.form.get("contact_source", "Manual"),
+            outreach_notes=request.form.get("outreach_notes", ""),
+        )
+        return redirect(url_for("index", msg=msg))
 
     @app.post("/save")
     def save():
