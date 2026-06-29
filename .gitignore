@@ -29,6 +29,9 @@ data/harvest_config.json
 # Local caches
 data/cache/
 
+# Local sync temp files
+.tmp.driveupload/
+
 # Pytest
 .pytest_cache/
 
