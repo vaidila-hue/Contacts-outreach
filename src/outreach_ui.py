@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from flask import Flask, redirect, render_template_string, request, url_for
 
 from src.gmail_client import build_gmail_service, verify_gmail_account
 from src.harvest_config_store import HarvestConfigSettings, load_harvest_config, save_harvest_config as persist_harvest_config
+from src.harvest_county_filter import (
+    load_county_options_for_states_with_status,
+    parse_selected_counties,
+)
 from src.harvest_runner import run_find_more_contacts
 from src.send_queue import (
     cancel_queue,
@@ -107,6 +112,10 @@ PAGE_TEMPLATE = """
     .modal { background: #fff; padding: 16px; border: 1px solid #888; max-width: 520px; width: 90%; max-height: 90vh; overflow: auto; }
     .modal label { display: block; font-weight: bold; margin-top: 8px; }
     .modal select[multiple] { height: 140px; }
+    .modal select[disabled] { background: #f3f3f3; color: #666; }
+    .modal .field-hint { font-size: 12px; font-weight: normal; color: #555; margin-top: 4px; }
+    .modal .field-status { font-size: 12px; color: #444; margin: 4px 0 8px; min-height: 16px; }
+    .modal .field-status.error { color: #a00; }
     .modal .row { display: flex; gap: 12px; }
     .modal .row > div { flex: 1; }
     .modal textarea.body-field { min-height: 220px; }
@@ -255,6 +264,91 @@ PAGE_TEMPLATE = """
       }
     }
     document.addEventListener('DOMContentLoaded', bindHarvestButtons);
+    var harvestSavedCountyValues = {{ harvest_saved_county_values_json | safe }};
+    var harvestCountyRefreshToken = 0;
+    function setHarvestCountyStatus(text, isError) {
+      var status = document.getElementById('harvest-county-status');
+      if (!status) return;
+      status.textContent = text || '';
+      status.classList.toggle('error', !!isError);
+    }
+    function refreshHarvestCountyOptions() {
+      var stateSelect = document.getElementById('harvest-states');
+      var countySelect = document.getElementById('harvest-counties');
+      if (!stateSelect || !countySelect) return;
+      var selectedStates = Array.from(stateSelect.selectedOptions).map(function(o) { return o.value; });
+      var hasStates = selectedStates.length > 0;
+      countySelect.disabled = !hasStates;
+      if (!hasStates) {
+        countySelect.innerHTML = '';
+        setHarvestCountyStatus('Select a state to load counties.', false);
+        return;
+      }
+      var prevSelected = new Set(Array.from(countySelect.selectedOptions).map(function(o) { return o.value; }));
+      if (countySelect.options.length === 0 && harvestSavedCountyValues.length) {
+        harvestSavedCountyValues.forEach(function(v) { prevSelected.add(v); });
+      }
+      var token = ++harvestCountyRefreshToken;
+      setHarvestCountyStatus('Loading counties…', false);
+      var url = '{{ url_for("harvest_counties") }}?states=' + encodeURIComponent(selectedStates.join(','));
+      fetch(url)
+        .then(function(resp) {
+          if (token !== harvestCountyRefreshToken) return null;
+          return resp.json().then(function(body) {
+            if (!resp.ok) {
+              var errText = (body && (body.error || body.message)) || ('HTTP ' + resp.status);
+              throw new Error(errText);
+            }
+            return body;
+          });
+        })
+        .then(function(body) {
+          if (!body || token !== harvestCountyRefreshToken) return;
+          var counties = Array.isArray(body.counties) ? body.counties : [];
+          countySelect.innerHTML = '';
+          counties.forEach(function(item) {
+            var opt = document.createElement('option');
+            opt.value = item.value;
+            opt.setAttribute('data-state', item.state);
+            opt.textContent = item.county + ', ' + item.state;
+            if (prevSelected.has(item.value) && selectedStates.indexOf(item.state) >= 0) {
+              opt.selected = true;
+            }
+            countySelect.appendChild(opt);
+          });
+          if (counties.length === 0) {
+            setHarvestCountyStatus(body.message || 'No counties found for selected states.', !!body.error);
+          } else {
+            setHarvestCountyStatus(body.message || ('Loaded ' + counties.length + ' counties.'), false);
+          }
+          if (body.error && counties.length > 0) {
+            setHarvestCountyStatus(body.message + ' ' + body.error, false);
+          }
+        })
+        .catch(function(err) {
+          if (token !== harvestCountyRefreshToken) return;
+          countySelect.innerHTML = '';
+          var msg = (err && err.message) ? err.message : 'County load failed.';
+          setHarvestCountyStatus('County load failed: ' + msg, true);
+        });
+    }
+    function clearHarvestCounties() {
+      var countySelect = document.getElementById('harvest-counties');
+      if (!countySelect) return;
+      Array.from(countySelect.options).forEach(function(opt) { opt.selected = false; });
+    }
+    function initHarvestCountySelector() {
+      var stateSelect = document.getElementById('harvest-states');
+      if (!stateSelect) return;
+      stateSelect.addEventListener('change', refreshHarvestCountyOptions);
+      stateSelect.addEventListener('input', refreshHarvestCountyOptions);
+      refreshHarvestCountyOptions();
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initHarvestCountySelector);
+    } else {
+      initHarvestCountySelector();
+    }
     function openDefaultMessageModal() {
       document.getElementById('default-message-modal').classList.add('open');
     }
@@ -301,7 +395,7 @@ PAGE_TEMPLATE = """
       <button type="button" id="settings-trigger" class="settings-trigger" onclick="toggleSettingsMenu(event)" aria-label="Settings" aria-haspopup="menu" aria-expanded="false" title="Settings">{{ settings_icon|safe }}</button>
       <div class="settings-dropdown" role="menu" aria-label="CRM settings">
         <button type="button" class="settings-item" role="menuitem" onclick="closeSettingsMenu(); document.getElementById('queue-settings-modal').classList.add('open')">Queue Settings</button>
-        <button type="button" class="settings-item" role="menuitem" onclick="closeSettingsMenu(); document.getElementById('harvest-modal').classList.add('open')">Reconfigure Contact Harvest</button>
+        <button type="button" class="settings-item" role="menuitem" onclick="closeSettingsMenu(); document.getElementById('harvest-modal').classList.add('open'); refreshHarvestCountyOptions();">Reconfigure Contact Harvest</button>
         <div class="settings-dropdown-divider" role="separator"></div>
         <form method="post" action="{{ url_for('pause_send_queue') }}">
           <button type="submit" class="settings-item" role="menuitem">Pause Sending</button>
@@ -572,14 +666,20 @@ PAGE_TEMPLATE = """
 
   <div id="harvest-modal" class="modal-backdrop" onclick="if(event.target===this)this.classList.remove('open')">
     <div class="modal" onclick="event.stopPropagation()">
+      <!-- harvest-county-v2 -->
       <h2>Reconfigure Contact Harvest</h2>
       <form method="post" action="{{ url_for('save_harvest_config') }}">
         <label>States (Ctrl+click for multiple)</label>
-        <select name="states" multiple>
+        <select name="states" multiple id="harvest-states">
           {% for st in us_states %}
           <option value="{{ st }}" {% if st in harvest_config.states %}selected{% endif %}>{{ st }}</option>
           {% endfor %}
         </select>
+        <label for="harvest-counties">Counties (Ctrl+click for multiple)</label>
+        <p class="field-hint">Optional: restrict harvest to jurisdictions within selected counties.</p>
+        <p id="harvest-county-status" class="field-status" role="status">Select a state to load counties.</p>
+        <select name="counties" multiple id="harvest-counties" {% if not harvest_config.states %}disabled{% endif %}></select>
+        <button type="button" class="link-btn" onclick="clearHarvestCounties()">Clear county selection</button>
         <div class="row">
           <div>
             <label>Min population</label>
@@ -742,6 +842,7 @@ def _parse_harvest_form() -> HarvestConfigSettings:
     states = [s.strip().upper() for s in request.form.getlist("states") if s.strip()]
     if not states:
         states = load_harvest_config().states
+    county_values = [v.strip() for v in request.form.getlist("counties") if v.strip()]
     return HarvestConfigSettings(
         states=states,
         min_population=int(request.form.get("min_population", 20000)),
@@ -749,10 +850,16 @@ def _parse_harvest_form() -> HarvestConfigSettings:
         limit=int(request.form.get("limit", 50)),
         include_counties=request.form.get("include_counties") == "yes",
         deep_mode=request.form.get("deep_mode") == "yes",
+        selected_counties=parse_selected_counties(county_values),
     )
 
 
 def create_app(*, start_worker: bool = False) -> Flask:
+    from dotenv import load_dotenv
+
+    from src.paths import ROOT
+
+    load_dotenv(ROOT / ".env")
     app = Flask(__name__)
 
     if start_worker:
@@ -816,6 +923,8 @@ def create_app(*, start_worker: bool = False) -> Flask:
         if request.args.get("harvest") == "1" and harvest_summary:
             message = harvest_summary.format_message()
         harvest_config = load_harvest_config()
+        selected_county_values = {c.option_value() for c in harvest_config.selected_counties}
+        harvest_saved_county_values_json = json.dumps(sorted(selected_county_values))
         default_message = load_default_message()
         send_queue_config = load_send_queue_config()
         return render_template_string(
@@ -826,6 +935,7 @@ def create_app(*, start_worker: bool = False) -> Flask:
             current_filter=filter_name,
             reply_status_values=REPLY_STATUS_VALUES,
             harvest_config=harvest_config,
+            harvest_saved_county_values_json=harvest_saved_county_values_json,
             harvest_summary=harvest_summary,
             harvest_dashboard=harvest_dashboard,
             harvest_running=harvest_running,
@@ -884,6 +994,31 @@ def create_app(*, start_worker: bool = False) -> Flask:
         else:
             msg = f"Removed {removed} contacts."
         return redirect(url_for("index", filter=filter_name, msg=msg))
+
+    @app.get("/harvest-config/counties")
+    def harvest_counties():
+        from flask import jsonify
+
+        states_param = request.args.get("states", "")
+        states = [s.strip().upper() for s in states_param.split(",") if s.strip()]
+        try:
+            result = load_county_options_for_states_with_status(
+                states,
+                min_population=0,
+                max_population=0,
+            )
+        except Exception as exc:
+            return jsonify(
+                {
+                    "counties": [],
+                    "message": "County load failed.",
+                    "error": str(exc),
+                }
+            ), 500
+        payload = result.to_api_payload()
+        if result.error and not result.counties:
+            return jsonify(payload), 500
+        return jsonify(payload)
 
     @app.post("/harvest-config/save")
     def save_harvest_config():

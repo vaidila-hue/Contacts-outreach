@@ -204,6 +204,7 @@ def test_run_find_more_skips_existing_and_writes_summary(harvest_paths, monkeypa
         limit=2,
         include_counties=False,
         deep_mode=False,
+        selected_counties=[],
     )
     from src.harvest_config_store import save_harvest_config
 
@@ -527,6 +528,7 @@ def test_run_find_more_does_not_modify_real_jurisdictions_csv(harvest_paths):
         limit=2,
         include_counties=False,
         deep_mode=False,
+        selected_counties=[],
     )
     from src.harvest_config_store import save_harvest_config
 

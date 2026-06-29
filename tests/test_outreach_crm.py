@@ -151,6 +151,7 @@ def test_harvest_config_persistence(crm_paths):
         limit=25,
         include_counties=True,
         deep_mode=True,
+        selected_counties=[],
     )
     save_harvest_config(settings)
     loaded = load_harvest_config()

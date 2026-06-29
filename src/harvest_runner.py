@@ -10,6 +10,7 @@ from src.directory_harvest import harvest_jurisdiction, sort_jurisdictions_for_h
 from src.domain_cache import load_domain_cache
 from src.export_results import merge_working_row, write_diagnostics_csv, write_rejected_csv, write_working_csv
 from src.fetch_pages import PageFetcher
+from src.harvest_county_filter import filter_jurisdictions_by_selected_counties
 from src.harvest_config_store import HarvestConfigSettings, load_harvest_config
 from src.harvest_report import analyze_harvest_run, enrich_summary, save_harvest_report
 from src.harvest_status import clear_harvest_running, set_harvest_running
@@ -89,6 +90,9 @@ def _run_find_more_contacts_impl() -> HarvestRunSummary:
     states = [s.strip().upper() for s in config.states if s.strip()]
     unsupported = unsupported_config_states(states)
     jurisdictions, _ = seed_jurisdictions(states, config.min_population, config.max_population)
+    jurisdictions = filter_jurisdictions_by_selected_counties(
+        jurisdictions, config.selected_counties
+    )
     jurisdictions = sort_jurisdictions_for_harvest(
         jurisdictions, include_counties=config.include_counties
     )

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
+from src.harvest_county_filter import SelectedCounty, parse_selected_counties
 from src.paths import DATA_DIR, DEFAULT_MAX_POP, DEFAULT_MIN_POP, DEFAULT_STATES, HARVEST_CONFIG_JSON
 
 
@@ -16,6 +17,7 @@ class HarvestConfigSettings:
     limit: int
     include_counties: bool
     deep_mode: bool
+    selected_counties: list[SelectedCounty] = field(default_factory=list)
 
     @classmethod
     def defaults(cls) -> HarvestConfigSettings:
@@ -26,6 +28,7 @@ class HarvestConfigSettings:
             limit=50,
             include_counties=False,
             deep_mode=False,
+            selected_counties=[],
         )
 
     def states_csv(self) -> str:
@@ -48,6 +51,9 @@ def load_harvest_config() -> HarvestConfigSettings:
             limit=int(raw.get("limit", defaults.limit)),
             include_counties=bool(raw.get("include_counties", defaults.include_counties)),
             deep_mode=bool(raw.get("deep_mode", defaults.deep_mode)),
+            selected_counties=parse_selected_counties(
+                raw.get("selected_counties", defaults.selected_counties)
+            ),
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return HarvestConfigSettings.defaults()

@@ -13,25 +13,57 @@ from src.csv_utils import write_csv
 from src.jurisdiction_utils import normalize_jurisdiction_name
 
 STATE_FIPS: dict[str, str] = {
+    "AL": "01",
+    "AK": "02",
+    "AZ": "04",
+    "AR": "05",
     "CA": "06",
+    "CO": "08",
     "CT": "09",
     "DE": "10",
     "FL": "12",
     "GA": "13",
+    "HI": "15",
+    "ID": "16",
+    "IL": "17",
+    "IN": "18",
+    "IA": "19",
+    "KS": "20",
+    "KY": "21",
+    "LA": "22",
+    "ME": "23",
+    "MD": "24",
+    "MA": "25",
     "MI": "26",
     "MN": "27",
+    "MS": "28",
     "MO": "29",
     "MT": "30",
+    "NE": "31",
     "NV": "32",
+    "NH": "33",
+    "NJ": "34",
     "NM": "35",
+    "NY": "36",
+    "NC": "37",
+    "ND": "38",
+    "OH": "39",
+    "OK": "40",
     "OR": "41",
     "PA": "42",
     "RI": "44",
+    "SC": "45",
+    "SD": "46",
+    "TN": "47",
     "TX": "48",
+    "UT": "49",
     "VT": "50",
     "VA": "51",
     "WA": "53",
+    "WV": "54",
     "WI": "55",
+    "WY": "56",
+    "DC": "11",
 }
 
 ACS_YEAR = "2023"
@@ -200,6 +232,26 @@ def _county_name_map(client: httpx.Client, state_fips: str) -> dict[str, str]:
         row[county_idx]: row[name_idx].replace(" County", "").strip()
         for row in rows
     }
+
+
+def list_census_counties(state: str) -> list[tuple[str, str]]:
+    """Return (fips_county, display_name) for all counties in a state via Census API."""
+    state = state.upper()
+    fips = STATE_FIPS.get(state)
+    if not fips:
+        return []
+    with httpx.Client() as client:
+        data = _fetch_geo(client, "county:*", fips)
+    header, *rows = data
+    name_i = header.index("NAME")
+    county_i = header.index("county")
+    results: list[tuple[str, str]] = []
+    for row in rows:
+        display = normalize_jurisdiction_name(row[name_i])
+        if not display.lower().endswith(" county"):
+            display = f"{display} County"
+        results.append((row[county_i], display))
+    return sorted(results, key=lambda item: item[1].lower())
 
 
 def seed_jurisdictions(

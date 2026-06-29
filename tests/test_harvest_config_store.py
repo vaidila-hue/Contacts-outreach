@@ -31,6 +31,7 @@ def test_save_harvest_config_writes_local_file(harvest_config_path):
         limit=25,
         include_counties=True,
         deep_mode=True,
+        selected_counties=[],
     )
 
     save_harvest_config(settings)
@@ -48,6 +49,7 @@ def test_load_after_restart_reads_saved_local_config(harvest_config_path):
         limit=40,
         include_counties=False,
         deep_mode=True,
+        selected_counties=[],
     )
     save_harvest_config(settings)
 
